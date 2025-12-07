@@ -1,0 +1,458 @@
+:root {
+  font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+
+  color-scheme: light dark;
+  color: rgba(255, 255, 255, 0.87);
+  background-color: #242424;
+
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  margin: 0;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+}
+
+#root {
+  width: 100%;
+  height: 100vh;
+}
+
+.app,
+.app-container {
+  display: flex;
+  height: 100vh;
+  background-color: #111827;
+  /* gray-900 */
+  color: white;
+}
+
+.sidebar {
+  width: 33%;
+  min-width: 400px;
+  max-width: 800px;
+  border-right: 1px solid #374151;
+  /* gray-700 */
+  display: flex;
+  flex-direction: column;
+}
+
+.header {
+  padding: 1rem;
+  border-bottom: 1px solid #374151;
+  background-color: #1f2937;
+  /* gray-800 */
+}
+
+.header h1 {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: bold;
+}
+
+.editor {
+  flex: 1;
+  background-color: #111827;
+  padding: 1rem;
+  font-family: monospace;
+  font-size: 0.875rem;
+  resize: none;
+  border: none;
+  color: #e5e7eb;
+  outline: none;
+}
+
+.main-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.viz-header {
+  padding: 1rem;
+  border-bottom: 1px solid #374151;
+  background-color: #1f2937;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.viz-header h2 {
+  margin: 0;
+  font-weight: 600;
+}
+
+.viz-info {
+  font-size: 0.875rem;
+  color: #9ca3af;
+}
+
+.viz-canvas {
+  flex: 1;
+  padding: 1rem;
+  overflow: hidden;
+  /* Let inner container handle overflow */
+  display: flex;
+  flex-direction: column;
+  background-color: #030712;
+  /* gray-950 */
+}
+
+.graph-container {
+  flex: 1;
+  overflow: auto;
+  border: 1px solid #374151;
+  background-color: #111827;
+  border-radius: 0.5rem;
+  display: flex;
+  flex-direction: column;
+}
+
+/* CodeEditor Styles */
+.editor-wrapper {
+  flex: 1;
+  position: relative;
+  background-color: #111827;
+  /* gray-900 */
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.code-editor-container {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  font-family: monospace;
+  font-size: 0.875rem;
+}
+
+.code-editor-backdrop {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  background-color: #111827;
+}
+
+.code-line {
+  width: 100%;
+}
+
+.code-line.highlighted {
+  background-color: #374151;
+  /* gray-700 */
+}
+
+.code-editor-textarea {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  background-color: transparent;
+  color: transparent;
+  caret-color: #e5e7eb;
+  padding: 0;
+  resize: none;
+  outline: none;
+  border: none;
+  font-family: inherit;
+  font-size: inherit;
+  z-index: 2;
+}
+
+.code-editor-textarea::selection {
+  background-color: #3b82f6;
+  color: white;
+}
+
+.code-editor-highlight {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  pointer-events: none;
+  font-family: inherit;
+  font-size: inherit;
+  color: #e5e7eb;
+  white-space: pre;
+  word-wrap: normal;
+  z-index: 1;
+}
+
+.mlir-line {
+  height: 21px;
+  line-height: 21px;
+  white-space: pre;
+}
+
+/* MLIR Syntax Highlighting Colors */
+.mlir-comment {
+  color: #6b7280;
+  /* gray-500 */
+  font-style: italic;
+}
+
+.mlir-keyword {
+  color: #c084fc;
+  /* purple-400 */
+  font-weight: 600;
+}
+
+.mlir-type {
+  color: #60a5fa;
+  /* blue-400 */
+}
+
+.mlir-operation {
+  color: #34d399;
+  /* emerald-400 */
+}
+
+.mlir-value {
+  color: #fbbf24;
+  /* amber-400 */
+}
+
+.mlir-attribute {
+  color: #f472b6;
+  /* pink-400 */
+}
+
+.mlir-number {
+  color: #fb923c;
+  /* orange-400 */
+}
+
+.mlir-string {
+  color: #86efac;
+  /* green-300 */
+}
+
+/* Diff Mode Styles */
+.mode-toggle {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 100;
+  display: flex;
+  gap: 0.5rem;
+  background-color: #1f2937;
+  padding: 0.5rem;
+  border-radius: 0.5rem;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+}
+
+.mode-toggle button {
+  padding: 0.5rem 1rem;
+  background-color: #374151;
+  color: #9ca3af;
+  border: none;
+  border-radius: 0.25rem;
+  cursor: pointer;
+  font-size: 0.875rem;
+  transition: all 0.2s;
+}
+
+.mode-toggle button:hover {
+  background-color: #4b5563;
+  color: white;
+}
+
+/* Side-by-side graphs */
+.graphs-side-by-side {
+  display: flex;
+  flex-direction: row;
+  gap: 16px;
+  flex: 1;
+  min-height: 0;
+}
+
+.graph-pane {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: #1f2937;
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.graph-pane h3 {
+  margin: 0 0 16px 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #9ca3af;
+}
+
+.mode-toggle button.active {
+  background-color: #3b82f6;
+  color: white;
+}
+
+.mode-toggle .separator {
+  color: #4b5563;
+  padding: 0 0.5rem;
+  display: flex;
+  align-items: center;
+}
+
+/* Diff Mode Layout */
+.diff-container {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  gap: 16px;
+  padding: 16px;
+}
+
+.editors-column {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  flex: 1;
+  min-width: 0;
+}
+
+.editor-wrapper {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: #1f2937;
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.editor-wrapper h3 {
+  margin: 0 0 8px 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #9ca3af;
+}
+
+.editor-wrapper .code-editor-container {
+  flex: 1;
+  min-height: 0;
+}
+
+.editor-label {
+  padding: 0.5rem 1rem;
+  background-color: #1f2937;
+  border-bottom: 1px solid #374151;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #9ca3af;
+}
+
+.editor-section .editor-wrapper {
+  flex: 1;
+}
+
+.graphs-column {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.side-by-side-graphs {
+  display: flex;
+  height: 100%;
+}
+
+.graph-pane {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid #374151;
+}
+
+.graph-pane:last-child {
+  border-right: none;
+}
+
+.graph-label {
+  padding: 0.5rem 1rem;
+  background-color: #1f2937;
+  border-bottom: 1px solid #374151;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #9ca3af;
+  text-align: center;
+}
+
+.graph-pane .circuit-graph-wrapper {
+  flex: 1;
+}
+
+
+/* CircuitGraph Styles */
+.circuit-graph-wrapper {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.circuit-graph-stats {
+  padding: 0.5rem;
+  background-color: #1f2937;
+  /* gray-800 */
+  border-bottom: 1px solid #374151;
+  display: flex;
+  gap: 1rem;
+  font-size: 0.875rem;
+}
+
+.circuit-graph-stats .label {
+  color: #9ca3af;
+  /* gray-400 */
+}
+
+/* Zoom Controls */
+.zoom-controls {
+  position: fixed;
+  bottom: 1rem;
+  right: 1rem;
+  display: flex;
+  gap: 0.5rem;
+  z-index: 10;
+}
+
+.zoom-controls button {
+  background-color: #374151;
+  /* gray-700 */
+  color: white;
+  border: 1px solid #4b5563;
+  /* gray-600 */
+  border-radius: 0.25rem;
+  padding: 0.25rem 0.5rem;
+  cursor: pointer;
+  font-size: 0.875rem;
+}
+
+.zoom-controls button:hover {
+  background-color: #4b5563;
+  /* gray-600 */
+}
+
+.transform-wrapper {
+  width: 100%;
+  height: 100%;
+}
+
+.transform-content {
+  width: 100%;
+  height: 100%;
+}
