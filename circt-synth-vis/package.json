@@ -1,14 +1,14 @@
 {
   "name": "circt-synth-dialect-vis",
-  "private": true,
   "version": "0.0.0",
+  "license": "Apache-2.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "deploy": "vite build && gh-pages -d dist"
+    "deploy": "vite build && gh-pages -d dist -e circt-synth-vis"
   },
   "dependencies": {
     "elkjs": "^0.11.0",
