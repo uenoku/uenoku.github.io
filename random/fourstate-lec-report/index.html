@@ -1,0 +1,1776 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>comb 4-state LEC: 23 invalid canonicalizations (with outputs)</title>
+<style>
+body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;max-width:1240px;margin:0 auto;padding:24px;color:#1a1a1a;background:#fafafa}
+header{background:#111;color:#fff;padding:24px;border-radius:12px}header code{background:#222;padding:2px 6px;border-radius:6px}
+.card{background:#fff;border:1px solid #e5e5e5;border-radius:12px;padding:18px;margin:22px 0;box-shadow:0 1px 4px rgba(0,0,0,.06)}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media(max-width:900px){.grid{grid-template-columns:1fr}}
+pre{background:#0f172a;color:#e2e8f0;padding:12px;border-radius:8px;overflow:auto;font-size:12.5px}
+table{border-collapse:collapse;width:100%;margin:8px 0}th,td{border:1px solid #ddd;padding:6px 8px;text-align:left;font-size:13px}th{background:#f1f5f9}
+.four{font-weight:700;font-family:monospace}.io{background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:8px 12px}
+.badge{display:inline-block;padding:3px 10px;border-radius:999px;font-size:12px;margin-right:6px}.eq2{background:#dcfce7}.neq4{background:#fee2e2}.bin{background:#e0e7ff}
+.desc{background:#fffbeb;border-left:4px solid #f59e0b;padding:10px 12px}
+.sub{color:#64748b;font-weight:400;font-size:12px}.note{color:#475 Rock;font-size:12.5px}.note{color:#475569;font-size:12.5px}
+.toc{columns:3}a{color:#2563eb}
+.simbox{background:#eff6ff;border:1px solid #bfdbfe;border-radius:12px;padding:16px;margin:18px 0}
+code{font-family:ui-monospace,Menlo,Consolas,monospace}
+</style></head><body>
+<header><h1>comb canonicalizations incorrect under 4-state logic — with outputs</h1>
+<p>Tool: <code>circt-lec --four-state</code> (dual-rail <code>iN → bv 2N</code>, <code>high=poison low=val</code>, Verilog X-propagation). Method: strip <code>bin</code> (2-state-only) from <code>test/Dialect/Comb/canonicalization.mlir</code>, compare <code>before</code> vs <code>-canonicalize</code> with 2-state (equiv) vs 4-state (inequiv). CIRCT base <code>7f3a5cb42</code> + branch <code>dev/hidetou/4-state</code> (4-state LEC mode). Tested with bin-flags stripped.</p></p>
+<p><b>Result: 23 / 112 modules invalid under 4-state</b> (19 unknown: <code>hw.wire/bitcast/array_get</code>, <code>hwarith</code>, <code>i0</code>, <code>test.*</code> not yet in 4-state encoder). Each card now shows <b>inputs + outputs of both sides</b> under the Z3 counterexample.</p></header>
+<h2>Index (23)</h2><ul class="toc"><li><a href='#muxConstantInputs'>muxConstantInputs</a></li><li><a href='#muxSingleBitConstantInputs'>muxSingleBitConstantInputs</a></li><li><a href='#muxSingleBitConstantInputs2'>muxSingleBitConstantInputs2</a></li><li><a href='#muxSingleBitConstantInputs3'>muxSingleBitConstantInputs3</a></li><li><a href='#muxSingleBitConstantInputs4'>muxSingleBitConstantInputs4</a></li><li><a href='#flattenMuxTrue'>flattenMuxTrue</a></li><li><a href='#flattenMuxFalse'>flattenMuxFalse</a></li><li><a href='#flattenMuxMixed'>flattenMuxMixed</a></li><li><a href='#compareStrengthSignedCommonPrefix'>compareStrengthSignedCommonPrefix</a></li><li><a href='#compareStrengthSignedCommonPrefixNoExtract'>compareStrengthSignedCommonPrefixNoExtract</a></li><li><a href='#compareConcatEliminationTrueCases'>compareConcatEliminationTrueCases</a></li><li><a href='#compareConcatEliminationFalseCases'>compareConcatEliminationFalseCases</a></li><li><a href='#compareExtractFold'>compareExtractFold</a></li><li><a href='#narrowAdditionSingleExtractUse'>narrowAdditionSingleExtractUse</a></li><li><a href='#narrowAdditionToWidestExtract'>narrowAdditionToWidestExtract</a></li><li><a href='#narrowAdditionExtractFromNoneZero'>narrowAdditionExtractFromNoneZero</a></li><li><a href='#narrowSubExtractFromNoneZero'>narrowSubExtractFromNoneZero</a></li><li><a href='#narrowMulExtractFromNoneZero'>narrowMulExtractFromNoneZero</a></li><li><a href='#narrow_extract_from_and'>narrow_extract_from_and</a></li><li><a href='#extractShift'>extractShift</a></li><li><a href='#muxConstantsFold'>muxConstantsFold</a></li><li><a href='#flatten_multi_use_and'>flatten_multi_use_and</a></li><li><a href='#Issue5531'>Issue5531</a></li></ul>
+
+<section class="card" id="muxConstantInputs">
+<h2>muxConstantInputs <span class="sub"><a href="https://github.com/llvm/circt/blob/main/test/Dialect/Comb/canonicalization.mlir#L67">canonicalization.mlir:67</a></span></h2>
+<p class="verdict"><span class="badge eq2">2-state: equiv</span> <span class="badge neq4">4-state: inequivalent</span> <span class="badge bin">bin-flag stripped</span></p>
+<p class="desc"><b>Fold:</b> <code>mux(cond, 2, 0) → concat(cond, 0)</code> (2'b10 vs 2'b00). <b>2-state ok:</b> bit1=cond, bit0=0. <b>4-state fail:</b> Verilog <code>?:</code> with <code>cond=Z</code> collapses disagreement to <code>X</code>, not <code>Z</code>. Before with <code>cond=Z</code> gives <code>X0</code> (bit1 1 vs 0 disagree → X, bit0 0 vs 0 agree → 0). After <code>concat(Z,0)=Z0</code>. <code>X0 ≠ Z0</code> under exact <code>!==</code>.</p>
+<div class="grid">
+<div><h3>Before <span class="sub">(original, bin stripped)</span></h3><pre>hw.module @c1(in %cond: i1, out o: i2) {
+// CHECK-NEXT: %false = hw.constant false
+// CHECK-NEXT: %0 = comb.concat %cond, %false : i1, i1
+  %c0 = hw.constant 2 : i2
+  %c1 = hw.constant 0 : i2
+  %0 = comb.mux %cond, %c0, %c1 : i2
+  hw.output %0 : i2
+}
+
+// CHECK-LABEL: @muxConstantInputs2
+</pre></div>
+<div><h3>After <span class="sub">(canonicalized)</span></h3><pre>hw.module @c2(in %cond : i1, out o : i2) {
+    %false = hw.constant false
+    %0 = comb.concat %cond, %false : i1, i1
+    hw.output %0 : i2
+  }
+</pre></div>
+</div>
+<h3>Counterexample inputs <span class="sub">(dual-rail Z3 model → 0/1/X/Z, MSB first)</span></h3>
+<table><tr><th>input</th><th>type</th><th>4-state</th><th>val/poison</th></tr><tr><td><code>%cond</code></td><td>i1</td><td class='four'>Z</code></td><td><code>v=1 p=1</code></td></tr></table>
+<h3>Outputs under counterexample <span class="sub">(evaluated with Verilog-like 4-state semantics — same as SMT encoding)</span></h3>
+<table><tr><th>port</th><th>type</th><th>before</th><th>after</th><th></th></tr><tr><td>out0</td><td>i2</td><td class='four'>X0</td><td class='four'>Z0</td><td>✗ differ</td></tr></table>
+<p class="io">Before outputs: <code class='four'>X0</code> <span class='sub'>(i2)</span><br>After outputs: <code class='four'>Z0</code> <span class='sub'>(i2)</span></p>
+<p class="note">Model: free 4-state inputs (X and Z allowed) where <code>distinct(out_before,out_after)</code> is SAT. <code>val&amp;pois</code> per bit decodes to <code>00=0,01=1,10=X,11=Z</code>. Outputs differ as full <code>2*N</code>-bit vectors (val and poison both compared). Computed with int-based 4-state interpreter matching the SMT encoding (<code>and/or</code> Kleene, <code>mux</code> agreement-else-X, <code>eq/ne</code> precise known-differ else X, ordered <code>any-X→X</code>).</p>
+<details><summary>Executable Verilog reproducer (hidden) — save as <code>repro.v</code>, run <code>iverilog -o sim repro.v && vvp sim</code></summary><pre>module c1(	// /tmp/tmpkc79zd1s.mlir:1:1
+  input        cond,	// /tmp/tmpkc79zd1s.mlir:1:18
+  output [1:0] o	// /tmp/tmpkc79zd1s.mlir:1:33
+);
+
+  assign o = cond ? 2&#x27;h2 : 2&#x27;h0;	// /tmp/tmpkc79zd1s.mlir:4:9, :5:9, :6:8, :7:3
+endmodule
+
+module c2(	// /tmp/tmpx3ngl89n.mlir:1:1
+  input        cond,	// /tmp/tmpx3ngl89n.mlir:1:18
+  output [1:0] o	// /tmp/tmpx3ngl89n.mlir:1:34
+);
+
+  assign o = {cond, 1&#x27;h0};	// /tmp/tmpx3ngl89n.mlir:2:14, :3:10, :4:5
+endmodule
+
+module tb;
+reg cond;
+wire [1:0] b_o; wire [1:0] a_o;
+c1 i1(.cond(cond), .o(b_o));
+c2 i2(.cond(cond), .o(a_o));
+initial begin
+  cond = 1&#x27;bz;
+  #1;
+  $display(&quot;RESULT %s&quot;, ((b_o===a_o))?&quot;EQ&quot;:&quot;DIFF&quot;);
+  $display(&quot;  o before=%b after=%b&quot;, b_o, a_o);
+  $finish;
+end
+endmodule
+</pre></details>
+</section>
+<section class="card" id="muxSingleBitConstantInputs">
+<h2>muxSingleBitConstantInputs <span class="sub"><a href="https://github.com/llvm/circt/blob/main/test/Dialect/Comb/canonicalization.mlir#L138">canonicalization.mlir:138</a></span></h2>
+<p class="verdict"><span class="badge eq2">2-state: equiv</span> <span class="badge neq4">4-state: inequivalent</span> <span class="badge bin">bin-flag stripped</span></p>
+<p class="desc"><b>Fold:</b> <code>mux(a,0,b) → and(~a,b)</code>. <b>2-state:</b> truth-table holds. <b>4-state:</b> e.g. <code>a=0,b=Z</code>: before <code>mux(0,0,Z)=Z</code> (select 0 picks <code>b</code> verbatim, even Z). After <code>and(1,Z)=X</code> (1&amp;Z→X, Z collapses to X through AND). So <code>Z≠X</code>.</p>
+<div class="grid">
+<div><h3>Before <span class="sub">(original, bin stripped)</span></h3><pre>hw.module @c1(in %a: i1, in %b: i1, out o: i1) {
+  // CHECK-NEXT: %true = hw.constant true
+  // CHECK-NEXT: %0 = comb.xor %a, %true : i1
+  // CHECK-NEXT: %1 = comb.and %0, %b : i1
+  // CHECK-NEXT: hw.output %1
+  %c0 = hw.constant 0 : i1
+  %0 = comb.mux %a, %c0, %b : i1
+  hw.output %0 : i1
+}
+
+// mux(a, 1, b) -&gt; or(a, b)
+// CHECK-LABEL: @muxSingleBitConstantInputs2
+</pre></div>
+<div><h3>After <span class="sub">(canonicalized)</span></h3><pre>hw.module @c2(in %a : i1, in %b : i1, out o : i1) {
+    %true = hw.constant true
+    %0 = comb.xor %a, %true : i1
+    %1 = comb.and %0, %b : i1
+    hw.output %1 : i1
+  }
+</pre></div>
+</div>
+<h3>Counterexample inputs <span class="sub">(dual-rail Z3 model → 0/1/X/Z, MSB first)</span></h3>
+<table><tr><th>input</th><th>type</th><th>4-state</th><th>val/poison</th></tr><tr><td><code>%a</code></td><td>i1</td><td class='four'>0</code></td><td><code>v=0 p=0</code></td></tr><tr><td><code>%b</code></td><td>i1</td><td class='four'>Z</code></td><td><code>v=1 p=1</code></td></tr></table>
+<h3>Outputs under counterexample <span class="sub">(evaluated with Verilog-like 4-state semantics — same as SMT encoding)</span></h3>
+<table><tr><th>port</th><th>type</th><th>before</th><th>after</th><th></th></tr><tr><td>out0</td><td>i1</td><td class='four'>Z</td><td class='four'>X</td><td>✗ differ</td></tr></table>
+<p class="io">Before outputs: <code class='four'>Z</code> <span class='sub'>(i1)</span><br>After outputs: <code class='four'>X</code> <span class='sub'>(i1)</span></p>
+<p class="note">Model: free 4-state inputs (X and Z allowed) where <code>distinct(out_before,out_after)</code> is SAT. <code>val&amp;pois</code> per bit decodes to <code>00=0,01=1,10=X,11=Z</code>. Outputs differ as full <code>2*N</code>-bit vectors (val and poison both compared). Computed with int-based 4-state interpreter matching the SMT encoding (<code>and/or</code> Kleene, <code>mux</code> agreement-else-X, <code>eq/ne</code> precise known-differ else X, ordered <code>any-X→X</code>).</p>
+<details><summary>Executable Verilog reproducer (hidden) — save as <code>repro.v</code>, run <code>iverilog -o sim repro.v && vvp sim</code></summary><pre>module c1(	// /tmp/tmpodyf1wu4.mlir:1:1
+  input  a,	// /tmp/tmpodyf1wu4.mlir:1:18
+         b,	// /tmp/tmpodyf1wu4.mlir:1:29
+  output o	// /tmp/tmpodyf1wu4.mlir:1:41
+);
+
+  assign o = a ? 1&#x27;h0 : b;	// /tmp/tmpodyf1wu4.mlir:6:9, :7:8, :8:3
+endmodule
+
+module c2(	// /tmp/tmp7rrqw0cm.mlir:1:1
+  input  a,	// /tmp/tmp7rrqw0cm.mlir:1:18
+         b,	// /tmp/tmp7rrqw0cm.mlir:1:30
+  output o	// /tmp/tmp7rrqw0cm.mlir:1:43
+);
+
+  assign o = ~a &amp; b;	// /tmp/tmp7rrqw0cm.mlir:3:10, :4:10, :5:5
+endmodule
+
+module tb;
+reg a;
+reg b;
+wire b_o; wire a_o;
+c1 i1(.a(a), .b(b), .o(b_o));
+c2 i2(.a(a), .b(b), .o(a_o));
+initial begin
+  a = 1&#x27;b0;
+  b = 1&#x27;bz;
+  #1;
+  $display(&quot;RESULT %s&quot;, ((b_o===a_o))?&quot;EQ&quot;:&quot;DIFF&quot;);
+  $display(&quot;  o before=%b after=%b&quot;, b_o, a_o);
+  $finish;
+end
+endmodule
+</pre></details>
+</section>
+<section class="card" id="muxSingleBitConstantInputs2">
+<h2>muxSingleBitConstantInputs2 <span class="sub"><a href="https://github.com/llvm/circt/blob/main/test/Dialect/Comb/canonicalization.mlir#L150">canonicalization.mlir:150</a></span></h2>
+<p class="verdict"><span class="badge eq2">2-state: equiv</span> <span class="badge neq4">4-state: inequivalent</span> <span class="badge bin">bin-flag stripped</span></p>
+<p class="desc"><b>Fold:</b> <code>mux(a,1,b) → or(a,b)</code>. Same root cause: <code>a=0,b=Z</code> gives before <code>Z</code> vs after <code>or(0,Z)=X</code>. Gate-level <code>or</code> never returns <code>Z</code>, only <code>X</code>.</p>
+<div class="grid">
+<div><h3>Before <span class="sub">(original, bin stripped)</span></h3><pre>hw.module @c1(in %a: i1, in %b: i1, out o: i1) {
+  // CHECK-NEXT: %0 = comb.or %a, %b : i1
+  // CHECK-NEXT: hw.output %0
+  %c0 = hw.constant 1 : i1
+  %0 = comb.mux %a, %c0, %b : i1
+  hw.output %0 : i1
+}
+
+// mux(a, b, 0) -&gt; and(a, b)
+// CHECK-LABEL: @muxSingleBitConstantInputs3
+</pre></div>
+<div><h3>After <span class="sub">(canonicalized)</span></h3><pre>hw.module @c2(in %a : i1, in %b : i1, out o : i1) {
+    %0 = comb.or %a, %b : i1
+    hw.output %0 : i1
+  }
+</pre></div>
+</div>
+<h3>Counterexample inputs <span class="sub">(dual-rail Z3 model → 0/1/X/Z, MSB first)</span></h3>
+<table><tr><th>input</th><th>type</th><th>4-state</th><th>val/poison</th></tr><tr><td><code>%a</code></td><td>i1</td><td class='four'>0</code></td><td><code>v=0 p=0</code></td></tr><tr><td><code>%b</code></td><td>i1</td><td class='four'>Z</code></td><td><code>v=1 p=1</code></td></tr></table>
+<h3>Outputs under counterexample <span class="sub">(evaluated with Verilog-like 4-state semantics — same as SMT encoding)</span></h3>
+<table><tr><th>port</th><th>type</th><th>before</th><th>after</th><th></th></tr><tr><td>out0</td><td>i1</td><td class='four'>Z</td><td class='four'>X</td><td>✗ differ</td></tr></table>
+<p class="io">Before outputs: <code class='four'>Z</code> <span class='sub'>(i1)</span><br>After outputs: <code class='four'>X</code> <span class='sub'>(i1)</span></p>
+<p class="note">Model: free 4-state inputs (X and Z allowed) where <code>distinct(out_before,out_after)</code> is SAT. <code>val&amp;pois</code> per bit decodes to <code>00=0,01=1,10=X,11=Z</code>. Outputs differ as full <code>2*N</code>-bit vectors (val and poison both compared). Computed with int-based 4-state interpreter matching the SMT encoding (<code>and/or</code> Kleene, <code>mux</code> agreement-else-X, <code>eq/ne</code> precise known-differ else X, ordered <code>any-X→X</code>).</p>
+<details><summary>Executable Verilog reproducer (hidden) — save as <code>repro.v</code>, run <code>iverilog -o sim repro.v && vvp sim</code></summary><pre>module c1(	// /tmp/tmpww1qeg04.mlir:1:1
+  input  a,	// /tmp/tmpww1qeg04.mlir:1:18
+         b,	// /tmp/tmpww1qeg04.mlir:1:29
+  output o	// /tmp/tmpww1qeg04.mlir:1:41
+);
+
+  assign o = a ? 1&#x27;h1 : b;	// /tmp/tmpww1qeg04.mlir:4:9, :5:8, :6:3
+endmodule
+
+module c2(	// /tmp/tmpa99ez1ig.mlir:1:1
+  input  a,	// /tmp/tmpa99ez1ig.mlir:1:18
+         b,	// /tmp/tmpa99ez1ig.mlir:1:30
+  output o	// /tmp/tmpa99ez1ig.mlir:1:43
+);
+
+  assign o = a | b;	// /tmp/tmpa99ez1ig.mlir:2:10, :3:5
+endmodule
+
+module tb;
+reg a;
+reg b;
+wire b_o; wire a_o;
+c1 i1(.a(a), .b(b), .o(b_o));
+c2 i2(.a(a), .b(b), .o(a_o));
+initial begin
+  a = 1&#x27;b0;
+  b = 1&#x27;bz;
+  #1;
+  $display(&quot;RESULT %s&quot;, ((b_o===a_o))?&quot;EQ&quot;:&quot;DIFF&quot;);
+  $display(&quot;  o before=%b after=%b&quot;, b_o, a_o);
+  $finish;
+end
+endmodule
+</pre></details>
+</section>
+<section class="card" id="muxSingleBitConstantInputs3">
+<h2>muxSingleBitConstantInputs3 <span class="sub"><a href="https://github.com/llvm/circt/blob/main/test/Dialect/Comb/canonicalization.mlir#L160">canonicalization.mlir:160</a></span></h2>
+<p class="verdict"><span class="badge eq2">2-state: equiv</span> <span class="badge neq4">4-state: inequivalent</span> <span class="badge bin">bin-flag stripped</span></p>
+<p class="desc"><b>Fold:</b> <code>mux(a,b,0) → and(a,b)</code>. Counterexample <code>a=1,b=Z</code>: before picks <code>b=Z</code>, after <code>and(1,Z)=X</code>.</p>
+<div class="grid">
+<div><h3>Before <span class="sub">(original, bin stripped)</span></h3><pre>hw.module @c1(in %a: i1, in %b: i1, out o: i1) {
+  // CHECK-NEXT: %0 = comb.and %a, %b : i1
+  // CHECK-NEXT: hw.output %0
+  %c0 = hw.constant 0 : i1
+  %0 = comb.mux %a, %b, %c0 : i1
+  hw.output %0 : i1
+}
+
+// mux(a, b, 1) -&gt; or(~a, b)
+// CHECK-LABEL: @muxSingleBitConstantInputs4
+</pre></div>
+<div><h3>After <span class="sub">(canonicalized)</span></h3><pre>hw.module @c2(in %a : i1, in %b : i1, out o : i1) {
+    %0 = comb.and %a, %b : i1
+    hw.output %0 : i1
+  }
+</pre></div>
+</div>
+<h3>Counterexample inputs <span class="sub">(dual-rail Z3 model → 0/1/X/Z, MSB first)</span></h3>
+<table><tr><th>input</th><th>type</th><th>4-state</th><th>val/poison</th></tr><tr><td><code>%a</code></td><td>i1</td><td class='four'>1</code></td><td><code>v=1 p=0</code></td></tr><tr><td><code>%b</code></td><td>i1</td><td class='four'>Z</code></td><td><code>v=1 p=1</code></td></tr></table>
+<h3>Outputs under counterexample <span class="sub">(evaluated with Verilog-like 4-state semantics — same as SMT encoding)</span></h3>
+<table><tr><th>port</th><th>type</th><th>before</th><th>after</th><th></th></tr><tr><td>out0</td><td>i1</td><td class='four'>Z</td><td class='four'>X</td><td>✗ differ</td></tr></table>
+<p class="io">Before outputs: <code class='four'>Z</code> <span class='sub'>(i1)</span><br>After outputs: <code class='four'>X</code> <span class='sub'>(i1)</span></p>
+<p class="note">Model: free 4-state inputs (X and Z allowed) where <code>distinct(out_before,out_after)</code> is SAT. <code>val&amp;pois</code> per bit decodes to <code>00=0,01=1,10=X,11=Z</code>. Outputs differ as full <code>2*N</code>-bit vectors (val and poison both compared). Computed with int-based 4-state interpreter matching the SMT encoding (<code>and/or</code> Kleene, <code>mux</code> agreement-else-X, <code>eq/ne</code> precise known-differ else X, ordered <code>any-X→X</code>).</p>
+<details><summary>Executable Verilog reproducer (hidden) — save as <code>repro.v</code>, run <code>iverilog -o sim repro.v && vvp sim</code></summary><pre>module c1(	// /tmp/tmprx34dp_j.mlir:1:1
+  input  a,	// /tmp/tmprx34dp_j.mlir:1:18
+         b,	// /tmp/tmprx34dp_j.mlir:1:29
+  output o	// /tmp/tmprx34dp_j.mlir:1:41
+);
+
+  assign o = a ? b : 1&#x27;h0;	// /tmp/tmprx34dp_j.mlir:4:9, :5:8, :6:3
+endmodule
+
+module c2(	// /tmp/tmpfnru9wiq.mlir:1:1
+  input  a,	// /tmp/tmpfnru9wiq.mlir:1:18
+         b,	// /tmp/tmpfnru9wiq.mlir:1:30
+  output o	// /tmp/tmpfnru9wiq.mlir:1:43
+);
+
+  assign o = a &amp; b;	// /tmp/tmpfnru9wiq.mlir:2:10, :3:5
+endmodule
+
+module tb;
+reg a;
+reg b;
+wire b_o; wire a_o;
+c1 i1(.a(a), .b(b), .o(b_o));
+c2 i2(.a(a), .b(b), .o(a_o));
+initial begin
+  a = 1&#x27;b1;
+  b = 1&#x27;bz;
+  #1;
+  $display(&quot;RESULT %s&quot;, ((b_o===a_o))?&quot;EQ&quot;:&quot;DIFF&quot;);
+  $display(&quot;  o before=%b after=%b&quot;, b_o, a_o);
+  $finish;
+end
+endmodule
+</pre></details>
+</section>
+<section class="card" id="muxSingleBitConstantInputs4">
+<h2>muxSingleBitConstantInputs4 <span class="sub"><a href="https://github.com/llvm/circt/blob/main/test/Dialect/Comb/canonicalization.mlir#L170">canonicalization.mlir:170</a></span></h2>
+<p class="verdict"><span class="badge eq2">2-state: equiv</span> <span class="badge neq4">4-state: inequivalent</span> <span class="badge bin">bin-flag stripped</span></p>
+<p class="desc"><b>Fold:</b> <code>mux(cond,arg0,1) → or(~cond,arg0)</code>. Counterexample <code>cond=1,arg0=Z</code>: before <code>Z</code>, after <code>or(0,Z)=X</code>.</p>
+<div class="grid">
+<div><h3>Before <span class="sub">(original, bin stripped)</span></h3><pre>hw.module @c1(in %cond: i1, in %arg0 : i1, out o: i1) {
+  // CHECK-NEXT: %true = hw.constant true
+  // CHECK-NEXT: %0 = comb.xor %cond, %true : i1
+  // CHECK-NEXT: %1 = comb.or %0, %arg0 : i1
+  // CHECK-NEXT: hw.output %1
+  %c0 = hw.constant 1 : i1
+  %0 = comb.mux %cond, %arg0, %c0 : i1
+  hw.output %0 : i1
+}
+
+
+// CHECK-LABEL: @notNot
+</pre></div>
+<div><h3>After <span class="sub">(canonicalized)</span></h3><pre>hw.module @c2(in %cond : i1, in %arg0 : i1, out o : i1) {
+    %true = hw.constant true
+    %0 = comb.xor %cond, %true : i1
+    %1 = comb.or %0, %arg0 : i1
+    hw.output %1 : i1
+  }
+</pre></div>
+</div>
+<h3>Counterexample inputs <span class="sub">(dual-rail Z3 model → 0/1/X/Z, MSB first)</span></h3>
+<table><tr><th>input</th><th>type</th><th>4-state</th><th>val/poison</th></tr><tr><td><code>%cond</code></td><td>i1</td><td class='four'>1</code></td><td><code>v=1 p=0</code></td></tr><tr><td><code>%arg0</code></td><td>i1</td><td class='four'>Z</code></td><td><code>v=1 p=1</code></td></tr></table>
+<h3>Outputs under counterexample <span class="sub">(evaluated with Verilog-like 4-state semantics — same as SMT encoding)</span></h3>
+<table><tr><th>port</th><th>type</th><th>before</th><th>after</th><th></th></tr><tr><td>out0</td><td>i1</td><td class='four'>Z</td><td class='four'>X</td><td>✗ differ</td></tr></table>
+<p class="io">Before outputs: <code class='four'>Z</code> <span class='sub'>(i1)</span><br>After outputs: <code class='four'>X</code> <span class='sub'>(i1)</span></p>
+<p class="note">Model: free 4-state inputs (X and Z allowed) where <code>distinct(out_before,out_after)</code> is SAT. <code>val&amp;pois</code> per bit decodes to <code>00=0,01=1,10=X,11=Z</code>. Outputs differ as full <code>2*N</code>-bit vectors (val and poison both compared). Computed with int-based 4-state interpreter matching the SMT encoding (<code>and/or</code> Kleene, <code>mux</code> agreement-else-X, <code>eq/ne</code> precise known-differ else X, ordered <code>any-X→X</code>).</p>
+<details><summary>Executable Verilog reproducer (hidden) — save as <code>repro.v</code>, run <code>iverilog -o sim repro.v && vvp sim</code></summary><pre>module c1(	// /tmp/tmp2xuqwqw5.mlir:1:1
+  input  cond,	// /tmp/tmp2xuqwqw5.mlir:1:18
+         arg0,	// /tmp/tmp2xuqwqw5.mlir:1:32
+  output o	// /tmp/tmp2xuqwqw5.mlir:1:48
+);
+
+  assign o = cond ? arg0 : 1&#x27;h1;	// /tmp/tmp2xuqwqw5.mlir:6:9, :7:8, :8:3
+endmodule
+
+module c2(	// /tmp/tmpmegcyhoy.mlir:1:1
+  input  cond,	// /tmp/tmpmegcyhoy.mlir:1:18
+         arg0,	// /tmp/tmpmegcyhoy.mlir:1:33
+  output o	// /tmp/tmpmegcyhoy.mlir:1:49
+);
+
+  assign o = ~cond | arg0;	// /tmp/tmpmegcyhoy.mlir:3:10, :4:10, :5:5
+endmodule
+
+module tb;
+reg cond;
+reg arg0;
+wire b_o; wire a_o;
+c1 i1(.cond(cond), .arg0(arg0), .o(b_o));
+c2 i2(.cond(cond), .arg0(arg0), .o(a_o));
+initial begin
+  cond = 1&#x27;b1;
+  arg0 = 1&#x27;bz;
+  #1;
+  $display(&quot;RESULT %s&quot;, ((b_o===a_o))?&quot;EQ&quot;:&quot;DIFF&quot;);
+  $display(&quot;  o before=%b after=%b&quot;, b_o, a_o);
+  $finish;
+end
+endmodule
+</pre></details>
+</section>
+<section class="card" id="flattenMuxTrue">
+<h2>flattenMuxTrue <span class="sub"><a href="https://github.com/llvm/circt/blob/main/test/Dialect/Comb/canonicalization.mlir#L249">canonicalization.mlir:249</a></span></h2>
+<p class="verdict"><span class="badge eq2">2-state: equiv</span> <span class="badge neq4">4-state: inequivalent</span> <span class="badge bin">bin-flag stripped</span></p>
+<p class="desc"><b>Fold:</b> flatten same-select mux chain <code>mux(s,a,b)→mux(s,·,c)→mux(s,·,d)</code> to <code>mux(s,a,d)</code>. <b>4-state:</b> with <code>s=X</code>, intermediates become <code>X</code> via agreement rule and feed further muxes, while flattened single mux computes agreement directly from <code>a,d</code>.</p>
+<div class="grid">
+<div><h3>Before <span class="sub">(original, bin stripped)</span></h3><pre>hw.module @c1(in %arg0 : i1, in %arg1 : i8, in %arg2: i8, in %arg3: i8, in %arg4 : i8, out o1 : i8) {
+// CHECK-NEXT:    [[RET:%[0-9]+]] = comb.mux %arg0, %arg1, %arg4
+// CHECK-NEXT:    hw.output [[RET]]
+  %0 = comb.mux %arg0, %arg1, %arg2 : i8
+  %1 = comb.mux %arg0, %0   , %arg3 : i8
+  %2 = comb.mux %arg0, %1   , %arg4 : i8
+  hw.output %2 : i8
+}
+
+// CHECK-LABEL: @flattenMuxFalse
+</pre></div>
+<div><h3>After <span class="sub">(canonicalized)</span></h3><pre>hw.module @c2(in %arg0 : i1, in %arg1 : i8, in %arg2 : i8, in %arg3 : i8, in %arg4 : i8, out o1 : i8) {
+    %0 = comb.mux %arg0, %arg1, %arg4 : i8
+    hw.output %0 : i8
+  }
+</pre></div>
+</div>
+<h3>Counterexample inputs <span class="sub">(dual-rail Z3 model → 0/1/X/Z, MSB first)</span></h3>
+<table><tr><th>input</th><th>type</th><th>4-state</th><th>val/poison</th></tr><tr><td><code>%arg0</code></td><td>i1</td><td class='four'>X</code></td><td><code>v=0 p=1</code></td></tr><tr><td><code>%arg1</code></td><td>i8</td><td class='four'>111X1110</code></td><td><code>v=11101110 p=00010000</code></td></tr><tr><td><code>%arg2</code></td><td>i8</td><td class='four'>11101110</code></td><td><code>v=11101110 p=00000000</code></td></tr><tr><td><code>%arg3</code></td><td>i8</td><td class='four'>11ZZ0ZZ0</code></td><td><code>v=11110110 p=00110110</code></td></tr><tr><td><code>%arg4</code></td><td>i8</td><td class='four'>011X111X</code></td><td><code>v=01101110 p=00010001</code></td></tr></table>
+<h3>Outputs under counterexample <span class="sub">(evaluated with Verilog-like 4-state semantics — same as SMT encoding)</span></h3>
+<table><tr><th>port</th><th>type</th><th>before</th><th>after</th><th></th></tr><tr><td>out0</td><td>i8</td><td class='four'>X1XXXXXX</td><td class='four'>X11X111X</td><td>✗ differ</td></tr></table>
+<p class="io">Before outputs: <code class='four'>X1XXXXXX</code> <span class='sub'>(i8)</span><br>After outputs: <code class='four'>X11X111X</code> <span class='sub'>(i8)</span></p>
+<p class="note">Model: free 4-state inputs (X and Z allowed) where <code>distinct(out_before,out_after)</code> is SAT. <code>val&amp;pois</code> per bit decodes to <code>00=0,01=1,10=X,11=Z</code>. Outputs differ as full <code>2*N</code>-bit vectors (val and poison both compared). Computed with int-based 4-state interpreter matching the SMT encoding (<code>and/or</code> Kleene, <code>mux</code> agreement-else-X, <code>eq/ne</code> precise known-differ else X, ordered <code>any-X→X</code>).</p>
+<details><summary>Executable Verilog reproducer (hidden) — save as <code>repro.v</code>, run <code>iverilog -o sim repro.v && vvp sim</code></summary><pre>module c1(	// /tmp/tmpxdp1ihte.mlir:1:1
+  input        arg0,	// /tmp/tmpxdp1ihte.mlir:1:18
+  input  [7:0] arg1,	// /tmp/tmpxdp1ihte.mlir:1:33
+               arg2,	// /tmp/tmpxdp1ihte.mlir:1:48
+               arg3,	// /tmp/tmpxdp1ihte.mlir:1:62
+               arg4,	// /tmp/tmpxdp1ihte.mlir:1:76
+  output [7:0] o1	// /tmp/tmpxdp1ihte.mlir:1:92
+);
+
+  assign o1 = arg0 ? (arg0 ? (arg0 ? arg1 : arg2) : arg3) : arg4;	// /tmp/tmpxdp1ihte.mlir:4:8, :5:8, :6:8, :7:3
+endmodule
+
+module c2(	// /tmp/tmpie7g6g3j.mlir:1:1
+  input        arg0,	// /tmp/tmpie7g6g3j.mlir:1:18
+  input  [7:0] arg1,	// /tmp/tmpie7g6g3j.mlir:1:33
+               arg2,	// /tmp/tmpie7g6g3j.mlir:1:48
+               arg3,	// /tmp/tmpie7g6g3j.mlir:1:63
+               arg4,	// /tmp/tmpie7g6g3j.mlir:1:78
+  output [7:0] o1	// /tmp/tmpie7g6g3j.mlir:1:94
+);
+
+  assign o1 = arg0 ? arg1 : arg4;	// /tmp/tmpie7g6g3j.mlir:2:10, :3:5
+endmodule
+
+module tb;
+reg arg0;
+reg [7:0] arg1;
+reg [7:0] arg2;
+reg [7:0] arg3;
+reg [7:0] arg4;
+wire [7:0] b_o1; wire [7:0] a_o1;
+c1 i1(.arg0(arg0), .arg1(arg1), .arg2(arg2), .arg3(arg3), .arg4(arg4), .o1(b_o1));
+c2 i2(.arg0(arg0), .arg1(arg1), .arg2(arg2), .arg3(arg3), .arg4(arg4), .o1(a_o1));
+initial begin
+  arg0 = 1&#x27;bx;
+  arg1 = 8&#x27;b111x1110;
+  arg2 = 8&#x27;b11101110;
+  arg3 = 8&#x27;b11zz0zz0;
+  arg4 = 8&#x27;b011x111x;
+  #1;
+  $display(&quot;RESULT %s&quot;, ((b_o1===a_o1))?&quot;EQ&quot;:&quot;DIFF&quot;);
+  $display(&quot;  o1 before=%b after=%b&quot;, b_o1, a_o1);
+  $finish;
+end
+endmodule
+</pre></details>
+</section>
+<section class="card" id="flattenMuxFalse">
+<h2>flattenMuxFalse <span class="sub"><a href="https://github.com/llvm/circt/blob/main/test/Dialect/Comb/canonicalization.mlir#L259">canonicalization.mlir:259</a></span></h2>
+<p class="verdict"><span class="badge eq2">2-state: equiv</span> <span class="badge neq4">4-state: inequivalent</span> <span class="badge bin">bin-flag stripped</span></p>
+<p class="desc">Dual of above, flattening false-side chain. <code>mux(X,·,·)</code> is not associative because <code>agree-then-X</code> loses information.</p>
+<div class="grid">
+<div><h3>Before <span class="sub">(original, bin stripped)</span></h3><pre>hw.module @c1(in %arg0 : i1, in %arg1 : i8, in %arg2: i8, in %arg3: i8, in %arg4 : i8, out o1 : i8) {
+// CHECK-NEXT:    [[RET:%[0-9]+]] = comb.mux %arg0, %arg4, %arg2
+// CHECK-NEXT:    hw.output [[RET]]
+  %0 = comb.mux %arg0, %arg1, %arg2 : i8
+  %1 = comb.mux %arg0, %arg3, %0    : i8
+  %2 = comb.mux %arg0, %arg4, %1    : i8
+  hw.output %2 : i8
+}
+
+// CHECK-LABEL: @flattenMuxMixed
+</pre></div>
+<div><h3>After <span class="sub">(canonicalized)</span></h3><pre>hw.module @c2(in %arg0 : i1, in %arg1 : i8, in %arg2 : i8, in %arg3 : i8, in %arg4 : i8, out o1 : i8) {
+    %0 = comb.mux %arg0, %arg4, %arg2 : i8
+    hw.output %0 : i8
+  }
+</pre></div>
+</div>
+<h3>Counterexample inputs <span class="sub">(dual-rail Z3 model → 0/1/X/Z, MSB first)</span></h3>
+<table><tr><th>input</th><th>type</th><th>4-state</th><th>val/poison</th></tr><tr><td><code>%arg0</code></td><td>i1</td><td class='four'>Z</code></td><td><code>v=1 p=1</code></td></tr><tr><td><code>%arg1</code></td><td>i8</td><td class='four'>ZZ1Z101Z</code></td><td><code>v=11111011 p=11010001</code></td></tr><tr><td><code>%arg2</code></td><td>i8</td><td class='four'>ZZ1Z10Z0</code></td><td><code>v=11111010 p=11010010</code></td></tr><tr><td><code>%arg3</code></td><td>i8</td><td class='four'>Z1XZ0X11</code></td><td><code>v=11010011 p=10110100</code></td></tr><tr><td><code>%arg4</code></td><td>i8</td><td class='four'>1Z1Z1X10</code></td><td><code>v=11111010 p=01010100</code></td></tr></table>
+<h3>Outputs under counterexample <span class="sub">(evaluated with Verilog-like 4-state semantics — same as SMT encoding)</span></h3>
+<table><tr><th>port</th><th>type</th><th>before</th><th>after</th><th></th></tr><tr><td>out0</td><td>i8</td><td class='four'>XXXZXXXX</td><td class='four'>XZ1Z1XX0</td><td>✗ differ</td></tr></table>
+<p class="io">Before outputs: <code class='four'>XXXZXXXX</code> <span class='sub'>(i8)</span><br>After outputs: <code class='four'>XZ1Z1XX0</code> <span class='sub'>(i8)</span></p>
+<p class="note">Model: free 4-state inputs (X and Z allowed) where <code>distinct(out_before,out_after)</code> is SAT. <code>val&amp;pois</code> per bit decodes to <code>00=0,01=1,10=X,11=Z</code>. Outputs differ as full <code>2*N</code>-bit vectors (val and poison both compared). Computed with int-based 4-state interpreter matching the SMT encoding (<code>and/or</code> Kleene, <code>mux</code> agreement-else-X, <code>eq/ne</code> precise known-differ else X, ordered <code>any-X→X</code>).</p>
+<details><summary>Executable Verilog reproducer (hidden) — save as <code>repro.v</code>, run <code>iverilog -o sim repro.v && vvp sim</code></summary><pre>module c1(	// /tmp/tmp4rj80z_z.mlir:1:1
+  input        arg0,	// /tmp/tmp4rj80z_z.mlir:1:18
+  input  [7:0] arg1,	// /tmp/tmp4rj80z_z.mlir:1:33
+               arg2,	// /tmp/tmp4rj80z_z.mlir:1:48
+               arg3,	// /tmp/tmp4rj80z_z.mlir:1:62
+               arg4,	// /tmp/tmp4rj80z_z.mlir:1:76
+  output [7:0] o1	// /tmp/tmp4rj80z_z.mlir:1:92
+);
+
+  assign o1 = arg0 ? arg4 : arg0 ? arg3 : arg0 ? arg1 : arg2;	// /tmp/tmp4rj80z_z.mlir:4:8, :5:8, :6:8, :7:3
+endmodule
+
+module c2(	// /tmp/tmp9pethwwf.mlir:1:1
+  input        arg0,	// /tmp/tmp9pethwwf.mlir:1:18
+  input  [7:0] arg1,	// /tmp/tmp9pethwwf.mlir:1:33
+               arg2,	// /tmp/tmp9pethwwf.mlir:1:48
+               arg3,	// /tmp/tmp9pethwwf.mlir:1:63
+               arg4,	// /tmp/tmp9pethwwf.mlir:1:78
+  output [7:0] o1	// /tmp/tmp9pethwwf.mlir:1:94
+);
+
+  assign o1 = arg0 ? arg4 : arg2;	// /tmp/tmp9pethwwf.mlir:2:10, :3:5
+endmodule
+
+module tb;
+reg arg0;
+reg [7:0] arg1;
+reg [7:0] arg2;
+reg [7:0] arg3;
+reg [7:0] arg4;
+wire [7:0] b_o1; wire [7:0] a_o1;
+c1 i1(.arg0(arg0), .arg1(arg1), .arg2(arg2), .arg3(arg3), .arg4(arg4), .o1(b_o1));
+c2 i2(.arg0(arg0), .arg1(arg1), .arg2(arg2), .arg3(arg3), .arg4(arg4), .o1(a_o1));
+initial begin
+  arg0 = 1&#x27;bz;
+  arg1 = 8&#x27;bzz1z101z;
+  arg2 = 8&#x27;bzz1z10z0;
+  arg3 = 8&#x27;bz1xz0x11;
+  arg4 = 8&#x27;b1z1z1x10;
+  #1;
+  $display(&quot;RESULT %s&quot;, ((b_o1===a_o1))?&quot;EQ&quot;:&quot;DIFF&quot;);
+  $display(&quot;  o1 before=%b after=%b&quot;, b_o1, a_o1);
+  $finish;
+end
+endmodule
+</pre></details>
+</section>
+<section class="card" id="flattenMuxMixed">
+<h2>flattenMuxMixed <span class="sub"><a href="https://github.com/llvm/circt/blob/main/test/Dialect/Comb/canonicalization.mlir#L269">canonicalization.mlir:269</a></span></h2>
+<p class="verdict"><span class="badge eq2">2-state: equiv</span> <span class="badge neq4">4-state: inequivalent</span> <span class="badge bin">bin-flag stripped</span></p>
+<p class="desc">Flattening balanced tree <code>mux(s,mux(s,a,b),mux(s,c,d)) → mux(s,a,d)</code>. With <code>s=X/Z</code>, inner muxes already collapse to <code>X</code> where operands disagree, changing outer agreement.</p>
+<div class="grid">
+<div><h3>Before <span class="sub">(original, bin stripped)</span></h3><pre>hw.module @c1(in %arg0 : i1, in %arg1 : i8, in %arg2: i8, in %arg3: i8, in %arg4 : i8, out o1 : i8) {
+// CHECK-NEXT:    [[RET:%[0-9]+]] = comb.mux %arg0, %arg1, %arg4
+// CHECK-NEXT:    hw.output [[RET]]
+  %0 = comb.mux %arg0, %arg1, %arg2 : i8
+  %1 = comb.mux %arg0, %arg3, %arg4 : i8
+  %2 = comb.mux %arg0, %0   , %1    : i8
+  hw.output %2 : i8
+}
+
+// CHECK-LABEL: @flattenNotOnDifferentCond
+</pre></div>
+<div><h3>After <span class="sub">(canonicalized)</span></h3><pre>hw.module @c2(in %arg0 : i1, in %arg1 : i8, in %arg2 : i8, in %arg3 : i8, in %arg4 : i8, out o1 : i8) {
+    %0 = comb.mux %arg0, %arg1, %arg4 : i8
+    hw.output %0 : i8
+  }
+</pre></div>
+</div>
+<h3>Counterexample inputs <span class="sub">(dual-rail Z3 model → 0/1/X/Z, MSB first)</span></h3>
+<table><tr><th>input</th><th>type</th><th>4-state</th><th>val/poison</th></tr><tr><td><code>%arg0</code></td><td>i1</td><td class='four'>Z</code></td><td><code>v=1 p=1</code></td></tr><tr><td><code>%arg1</code></td><td>i8</td><td class='four'>0ZZ10ZZ0</code></td><td><code>v=01110110 p=01100110</code></td></tr><tr><td><code>%arg2</code></td><td>i8</td><td class='four'>0XZZ01ZX</code></td><td><code>v=00110110 p=01110011</code></td></tr><tr><td><code>%arg3</code></td><td>i8</td><td class='four'>0Z1X1Z1X</code></td><td><code>v=01101110 p=01010101</code></td></tr><tr><td><code>%arg4</code></td><td>i8</td><td class='four'>ZZZ10ZZ0</code></td><td><code>v=11110110 p=11100110</code></td></tr></table>
+<h3>Outputs under counterexample <span class="sub">(evaluated with Verilog-like 4-state semantics — same as SMT encoding)</span></h3>
+<table><tr><th>port</th><th>type</th><th>before</th><th>after</th><th></th></tr><tr><td>out0</td><td>i8</td><td class='four'>XXXXXXXX</td><td class='four'>XZZ10ZZ0</td><td>✗ differ</td></tr></table>
+<p class="io">Before outputs: <code class='four'>XXXXXXXX</code> <span class='sub'>(i8)</span><br>After outputs: <code class='four'>XZZ10ZZ0</code> <span class='sub'>(i8)</span></p>
+<p class="note">Model: free 4-state inputs (X and Z allowed) where <code>distinct(out_before,out_after)</code> is SAT. <code>val&amp;pois</code> per bit decodes to <code>00=0,01=1,10=X,11=Z</code>. Outputs differ as full <code>2*N</code>-bit vectors (val and poison both compared). Computed with int-based 4-state interpreter matching the SMT encoding (<code>and/or</code> Kleene, <code>mux</code> agreement-else-X, <code>eq/ne</code> precise known-differ else X, ordered <code>any-X→X</code>).</p>
+<details><summary>Executable Verilog reproducer (hidden) — save as <code>repro.v</code>, run <code>iverilog -o sim repro.v && vvp sim</code></summary><pre>module c1(	// /tmp/tmpazlpcq6h.mlir:1:1
+  input        arg0,	// /tmp/tmpazlpcq6h.mlir:1:18
+  input  [7:0] arg1,	// /tmp/tmpazlpcq6h.mlir:1:33
+               arg2,	// /tmp/tmpazlpcq6h.mlir:1:48
+               arg3,	// /tmp/tmpazlpcq6h.mlir:1:62
+               arg4,	// /tmp/tmpazlpcq6h.mlir:1:76
+  output [7:0] o1	// /tmp/tmpazlpcq6h.mlir:1:92
+);
+
+  assign o1 = arg0 ? (arg0 ? arg1 : arg2) : arg0 ? arg3 : arg4;	// /tmp/tmpazlpcq6h.mlir:4:8, :5:8, :6:8, :7:3
+endmodule
+
+module c2(	// /tmp/tmpl47q7y0k.mlir:1:1
+  input        arg0,	// /tmp/tmpl47q7y0k.mlir:1:18
+  input  [7:0] arg1,	// /tmp/tmpl47q7y0k.mlir:1:33
+               arg2,	// /tmp/tmpl47q7y0k.mlir:1:48
+               arg3,	// /tmp/tmpl47q7y0k.mlir:1:63
+               arg4,	// /tmp/tmpl47q7y0k.mlir:1:78
+  output [7:0] o1	// /tmp/tmpl47q7y0k.mlir:1:94
+);
+
+  assign o1 = arg0 ? arg1 : arg4;	// /tmp/tmpl47q7y0k.mlir:2:10, :3:5
+endmodule
+
+module tb;
+reg arg0;
+reg [7:0] arg1;
+reg [7:0] arg2;
+reg [7:0] arg3;
+reg [7:0] arg4;
+wire [7:0] b_o1; wire [7:0] a_o1;
+c1 i1(.arg0(arg0), .arg1(arg1), .arg2(arg2), .arg3(arg3), .arg4(arg4), .o1(b_o1));
+c2 i2(.arg0(arg0), .arg1(arg1), .arg2(arg2), .arg3(arg3), .arg4(arg4), .o1(a_o1));
+initial begin
+  arg0 = 1&#x27;bz;
+  arg1 = 8&#x27;b0zz10zz0;
+  arg2 = 8&#x27;b0xzz01zx;
+  arg3 = 8&#x27;b0z1x1z1x;
+  arg4 = 8&#x27;bzzz10zz0;
+  #1;
+  $display(&quot;RESULT %s&quot;, ((b_o1===a_o1))?&quot;EQ&quot;:&quot;DIFF&quot;);
+  $display(&quot;  o1 before=%b after=%b&quot;, b_o1, a_o1);
+  $finish;
+end
+endmodule
+</pre></details>
+</section>
+<section class="card" id="compareStrengthSignedCommonPrefix">
+<h2>compareStrengthSignedCommonPrefix <span class="sub"><a href="https://github.com/llvm/circt/blob/main/test/Dialect/Comb/canonicalization.mlir#L362">canonicalization.mlir:362</a></span></h2>
+<p class="verdict"><span class="badge eq2">2-state: equiv</span> <span class="badge neq4">4-state: inequivalent</span> <span class="badge bin">bin-flag stripped</span></p>
+<p class="desc"><b>Fold:</b> <code>scmp(concat(pref,a),concat(pref,b)) → scmp(a,b)</code> dropping common prefix. <b>4-state:</b> if prefix contains <code>X</code> (here <code>arg0=00X</code>), original signed compare yields <code>X</code> (any X → X), while narrowed compare on suffixes yields known <code>0</code>.</p>
+<div class="grid">
+<div><h3>Before <span class="sub">(original, bin stripped)</span></h3><pre>hw.module @c1(in %arg0 : i3, in %arg1 : i9, in %arg2: i9, out o : i1) {
+  %0 = comb.concat %arg0, %arg1 : i3, i9
+  %1 = comb.concat %arg0, %arg2 : i3, i9
+  %2 = comb.icmp sge %0, %1 : i12
+  hw.output %2 : i1
+}
+
+// Validates that narrowing signed comparisons that strips of the common suffix
+// must add the sign-bit. The sign bit if the leading common element has a length of 1.
+// CHECK-LABEL: hw.module @compareStrengthSignedCommonPrefixNoExtract
+// CHECK-NEXT:    [[ARG1:%[0-9]+]] = comb.concat %arg0, %arg2 : i1, i9
+// CHECK-NEXT:    [[ARG2:%[0-9]+]] = comb.concat %arg0, %arg3 : i1, i9
+// CHECK-NEXT:    [[RES:%[0-9]+]] = comb.icmp sge [[ARG1]], [[ARG2]] : i10
+// CHECK-NEXT:    hw.output [[RES]] : i1
+</pre></div>
+<div><h3>After <span class="sub">(canonicalized)</span></h3><pre>hw.module @c2(in %arg0 : i3, in %arg1 : i9, in %arg2 : i9, out o : i1) {
+    %0 = comb.extract %arg0 from 2 : (i3) -&gt; i1
+    %1 = comb.concat %0, %arg1 : i1, i9
+    %2 = comb.concat %0, %arg2 : i1, i9
+    %3 = comb.icmp sge %1, %2 : i10
+    hw.output %3 : i1
+  }
+</pre></div>
+</div>
+<h3>Counterexample inputs <span class="sub">(dual-rail Z3 model → 0/1/X/Z, MSB first)</span></h3>
+<table><tr><th>input</th><th>type</th><th>4-state</th><th>val/poison</th></tr><tr><td><code>%arg0</code></td><td>i3</td><td class='four'>00X</code></td><td><code>v=000 p=001</code></td></tr><tr><td><code>%arg1</code></td><td>i9</td><td class='four'>000111110</code></td><td><code>v=000111110 p=000000000</code></td></tr><tr><td><code>%arg2</code></td><td>i9</td><td class='four'>001000000</code></td><td><code>v=001000000 p=000000000</code></td></tr></table>
+<h3>Outputs under counterexample <span class="sub">(evaluated with Verilog-like 4-state semantics — same as SMT encoding)</span></h3>
+<table><tr><th>port</th><th>type</th><th>before</th><th>after</th><th></th></tr><tr><td>out0</td><td>i1</td><td class='four'>X</td><td class='four'>0</td><td>✗ differ</td></tr></table>
+<p class="io">Before outputs: <code class='four'>X</code> <span class='sub'>(i1)</span><br>After outputs: <code class='four'>0</code> <span class='sub'>(i1)</span></p>
+<p class="note">Model: free 4-state inputs (X and Z allowed) where <code>distinct(out_before,out_after)</code> is SAT. <code>val&amp;pois</code> per bit decodes to <code>00=0,01=1,10=X,11=Z</code>. Outputs differ as full <code>2*N</code>-bit vectors (val and poison both compared). Computed with int-based 4-state interpreter matching the SMT encoding (<code>and/or</code> Kleene, <code>mux</code> agreement-else-X, <code>eq/ne</code> precise known-differ else X, ordered <code>any-X→X</code>).</p>
+<details><summary>Executable Verilog reproducer (hidden) — save as <code>repro.v</code>, run <code>iverilog -o sim repro.v && vvp sim</code></summary><pre>module c1(	// /tmp/tmpsoghjum3.mlir:1:1
+  input  [2:0] arg0,	// /tmp/tmpsoghjum3.mlir:1:18
+  input  [8:0] arg1,	// /tmp/tmpsoghjum3.mlir:1:33
+               arg2,	// /tmp/tmpsoghjum3.mlir:1:48
+  output       o	// /tmp/tmpsoghjum3.mlir:1:63
+);
+
+  assign o = $signed({arg0, arg1}) &gt;= $signed({arg0, arg2});	// /tmp/tmpsoghjum3.mlir:2:8, :3:8, :4:8, :5:3
+endmodule
+
+module c2(	// /tmp/tmpn_2dmjf_.mlir:1:1
+  input  [2:0] arg0,	// /tmp/tmpn_2dmjf_.mlir:1:18
+  input  [8:0] arg1,	// /tmp/tmpn_2dmjf_.mlir:1:33
+               arg2,	// /tmp/tmpn_2dmjf_.mlir:1:48
+  output       o	// /tmp/tmpn_2dmjf_.mlir:1:64
+);
+
+  assign o = $signed({arg0[2], arg1}) &gt;= $signed({arg0[2], arg2});	// /tmp/tmpn_2dmjf_.mlir:2:10, :3:10, :4:10, :5:10, :6:5
+endmodule
+
+module tb;
+reg [2:0] arg0;
+reg [8:0] arg1;
+reg [8:0] arg2;
+wire b_o; wire a_o;
+c1 i1(.arg0(arg0), .arg1(arg1), .arg2(arg2), .o(b_o));
+c2 i2(.arg0(arg0), .arg1(arg1), .arg2(arg2), .o(a_o));
+initial begin
+  arg0 = 3&#x27;b00x;
+  arg1 = 9&#x27;b000111110;
+  arg2 = 9&#x27;b001000000;
+  #1;
+  $display(&quot;RESULT %s&quot;, ((b_o===a_o))?&quot;EQ&quot;:&quot;DIFF&quot;);
+  $display(&quot;  o before=%b after=%b&quot;, b_o, a_o);
+  $finish;
+end
+endmodule
+</pre></details>
+</section>
+<section class="card" id="compareStrengthSignedCommonPrefixNoExtract">
+<h2>compareStrengthSignedCommonPrefixNoExtract <span class="sub"><a href="https://github.com/llvm/circt/blob/main/test/Dialect/Comb/canonicalization.mlir#L376">canonicalization.mlir:376</a></span></h2>
+<p class="verdict"><span class="badge eq2">2-state: equiv</span> <span class="badge neq4">4-state: inequivalent</span> <span class="badge bin">bin-flag stripped</span></p>
+<p class="desc">Same as above with wider concat: dropping <code>i1+i3</code> common prefix changes X-propagation of signed <code>sge</code>. Narrowed 10-bit compare is known while original 13-bit compare is <code>X</code>.</p>
+<div class="grid">
+<div><h3>Before <span class="sub">(original, bin stripped)</span></h3><pre>hw.module @c1(in %arg0 : i1, in %arg1 : i3, in %arg2: i9, in %arg3: i9, out o : i1) {
+  %0 = comb.concat %arg0, %arg1, %arg2 : i1, i3, i9
+  %1 = comb.concat %arg0, %arg1, %arg3 : i1, i3, i9
+  %2 = comb.icmp sge %0, %1 : i13
+  hw.output %2 : i1
+}
+
+// Validates that cmp(concat(..), concat(...)) that should be simplified to true
+// are indeed so.
+// CHECK-LABEL: hw.module @compareConcatEliminationTrueCases
+// CHECK-NEXT:    %true = hw.constant true
+// CHECK-NEXT:    hw.output %true : i1
+</pre></div>
+<div><h3>After <span class="sub">(canonicalized)</span></h3><pre>hw.module @c2(in %arg0 : i1, in %arg1 : i3, in %arg2 : i9, in %arg3 : i9, out o : i1) {
+    %0 = comb.concat %arg0, %arg2 : i1, i9
+    %1 = comb.concat %arg0, %arg3 : i1, i9
+    %2 = comb.icmp sge %0, %1 : i10
+    hw.output %2 : i1
+  }
+</pre></div>
+</div>
+<h3>Counterexample inputs <span class="sub">(dual-rail Z3 model → 0/1/X/Z, MSB first)</span></h3>
+<table><tr><th>input</th><th>type</th><th>4-state</th><th>val/poison</th></tr><tr><td><code>%arg0</code></td><td>i1</td><td class='four'>0</code></td><td><code>v=0 p=0</code></td></tr><tr><td><code>%arg1</code></td><td>i3</td><td class='four'>X00</code></td><td><code>v=000 p=100</code></td></tr><tr><td><code>%arg2</code></td><td>i9</td><td class='four'>000000000</code></td><td><code>v=000000000 p=000000000</code></td></tr><tr><td><code>%arg3</code></td><td>i9</td><td class='four'>000000001</code></td><td><code>v=000000001 p=000000000</code></td></tr></table>
+<h3>Outputs under counterexample <span class="sub">(evaluated with Verilog-like 4-state semantics — same as SMT encoding)</span></h3>
+<table><tr><th>port</th><th>type</th><th>before</th><th>after</th><th></th></tr><tr><td>out0</td><td>i1</td><td class='four'>X</td><td class='four'>0</td><td>✗ differ</td></tr></table>
+<p class="io">Before outputs: <code class='four'>X</code> <span class='sub'>(i1)</span><br>After outputs: <code class='four'>0</code> <span class='sub'>(i1)</span></p>
+<p class="note">Model: free 4-state inputs (X and Z allowed) where <code>distinct(out_before,out_after)</code> is SAT. <code>val&amp;pois</code> per bit decodes to <code>00=0,01=1,10=X,11=Z</code>. Outputs differ as full <code>2*N</code>-bit vectors (val and poison both compared). Computed with int-based 4-state interpreter matching the SMT encoding (<code>and/or</code> Kleene, <code>mux</code> agreement-else-X, <code>eq/ne</code> precise known-differ else X, ordered <code>any-X→X</code>).</p>
+<details><summary>Executable Verilog reproducer (hidden) — save as <code>repro.v</code>, run <code>iverilog -o sim repro.v && vvp sim</code></summary><pre>module c1(	// /tmp/tmpsh3pdo2t.mlir:1:1
+  input        arg0,	// /tmp/tmpsh3pdo2t.mlir:1:18
+  input  [2:0] arg1,	// /tmp/tmpsh3pdo2t.mlir:1:33
+  input  [8:0] arg2,	// /tmp/tmpsh3pdo2t.mlir:1:48
+               arg3,	// /tmp/tmpsh3pdo2t.mlir:1:62
+  output       o	// /tmp/tmpsh3pdo2t.mlir:1:77
+);
+
+  assign o = $signed({arg0, arg1, arg2}) &gt;= $signed({arg0, arg1, arg3});	// /tmp/tmpsh3pdo2t.mlir:2:8, :3:8, :4:8, :5:3
+endmodule
+
+module c2(	// /tmp/tmpj3vognev.mlir:1:1
+  input        arg0,	// /tmp/tmpj3vognev.mlir:1:18
+  input  [2:0] arg1,	// /tmp/tmpj3vognev.mlir:1:33
+  input  [8:0] arg2,	// /tmp/tmpj3vognev.mlir:1:48
+               arg3,	// /tmp/tmpj3vognev.mlir:1:63
+  output       o	// /tmp/tmpj3vognev.mlir:1:79
+);
+
+  assign o = $signed({arg0, arg2}) &gt;= $signed({arg0, arg3});	// /tmp/tmpj3vognev.mlir:2:10, :3:10, :4:10, :5:5
+endmodule
+
+module tb;
+reg arg0;
+reg [2:0] arg1;
+reg [8:0] arg2;
+reg [8:0] arg3;
+wire b_o; wire a_o;
+c1 i1(.arg0(arg0), .arg1(arg1), .arg2(arg2), .arg3(arg3), .o(b_o));
+c2 i2(.arg0(arg0), .arg1(arg1), .arg2(arg2), .arg3(arg3), .o(a_o));
+initial begin
+  arg0 = 1&#x27;b0;
+  arg1 = 3&#x27;bx00;
+  arg2 = 9&#x27;b000000000;
+  arg3 = 9&#x27;b000000001;
+  #1;
+  $display(&quot;RESULT %s&quot;, ((b_o===a_o))?&quot;EQ&quot;:&quot;DIFF&quot;);
+  $display(&quot;  o before=%b after=%b&quot;, b_o, a_o);
+  $finish;
+end
+endmodule
+</pre></details>
+</section>
+<section class="card" id="compareConcatEliminationTrueCases">
+<h2>compareConcatEliminationTrueCases <span class="sub"><a href="https://github.com/llvm/circt/blob/main/test/Dialect/Comb/canonicalization.mlir#L388">canonicalization.mlir:388</a></span></h2>
+<p class="verdict"><span class="badge eq2">2-state: equiv</span> <span class="badge neq4">4-state: inequivalent</span> <span class="badge bin">bin-flag stripped</span></p>
+<p class="desc"><b>Fold:</b> <code>(x sle x)&(x sge x)&(x ule x)&(x uge x)&(x==x) → true</code> (same concat twice). <b>4-state:</b> each <code>==/sle/…</code> with <code>X</code> bits yields <code>X</code>, and <code>and(X,…,X)=X</code>, not <code>1</code>. Counterexample has <code>X</code> in low bits.</p>
+<div class="grid">
+<div><h3>Before <span class="sub">(original, bin stripped)</span></h3><pre>hw.module @c1(in %arg0 : i4, in %arg1 : i9, in %arg2: i7, out o : i1) {
+  %0 = comb.concat %arg0, %arg1, %arg2 : i4, i9, i7
+  %1 = comb.concat %arg0, %arg1, %arg2 : i4, i9, i7
+  %2 = comb.icmp sle %0, %1 : i20
+  %3 = comb.icmp sge %0, %1 : i20
+  %4 = comb.icmp ule %0, %1 : i20
+  %5 = comb.icmp uge %0, %1 : i20
+  %6 = comb.icmp  eq %0, %1 : i20
+  %o = comb.and %2, %3, %4, %5, %6 : i1
+  hw.output %o : i1
+}
+
+// Validates cases of cmp(concat(..), concat(...)) that should be simplified to false
+// are indeed so.
+// CHECK-LABEL: hw.module @compareConcatEliminationFalseCases
+// CHECK-NEXT:    %false = hw.constant false
+// CHECK-NEXT:    hw.output %false : i1
+</pre></div>
+<div><h3>After <span class="sub">(canonicalized)</span></h3><pre>hw.module @c2(in %arg0 : i4, in %arg1 : i9, in %arg2 : i7, out o : i1) {
+    %true = hw.constant true
+    hw.output %true : i1
+  }
+</pre></div>
+</div>
+<h3>Counterexample inputs <span class="sub">(dual-rail Z3 model → 0/1/X/Z, MSB first)</span></h3>
+<table><tr><th>input</th><th>type</th><th>4-state</th><th>val/poison</th></tr><tr><td><code>%arg0</code></td><td>i4</td><td class='four'>0000</code></td><td><code>v=0000 p=0000</code></td></tr><tr><td><code>%arg1</code></td><td>i9</td><td class='four'>000000000</code></td><td><code>v=000000000 p=000000000</code></td></tr><tr><td><code>%arg2</code></td><td>i7</td><td class='four'>XXXXXXX</code></td><td><code>v=0000000 p=1111111</code></td></tr></table>
+<h3>Outputs under counterexample <span class="sub">(evaluated with Verilog-like 4-state semantics — same as SMT encoding)</span></h3>
+<table><tr><th>port</th><th>type</th><th>before</th><th>after</th><th></th></tr><tr><td>out0</td><td>i1</td><td class='four'>X</td><td class='four'>1</td><td>✗ differ</td></tr></table>
+<p class="io">Before outputs: <code class='four'>X</code> <span class='sub'>(i1)</span><br>After outputs: <code class='four'>1</code> <span class='sub'>(i1)</span></p>
+<p class="note">Model: free 4-state inputs (X and Z allowed) where <code>distinct(out_before,out_after)</code> is SAT. <code>val&amp;pois</code> per bit decodes to <code>00=0,01=1,10=X,11=Z</code>. Outputs differ as full <code>2*N</code>-bit vectors (val and poison both compared). Computed with int-based 4-state interpreter matching the SMT encoding (<code>and/or</code> Kleene, <code>mux</code> agreement-else-X, <code>eq/ne</code> precise known-differ else X, ordered <code>any-X→X</code>).</p>
+<details><summary>Executable Verilog reproducer (hidden) — save as <code>repro.v</code>, run <code>iverilog -o sim repro.v && vvp sim</code></summary><pre>module c1(	// /tmp/tmpagr4n4a3.mlir:1:1
+  input  [3:0] arg0,	// /tmp/tmpagr4n4a3.mlir:1:18
+  input  [8:0] arg1,	// /tmp/tmpagr4n4a3.mlir:1:33
+  input  [6:0] arg2,	// /tmp/tmpagr4n4a3.mlir:1:48
+  output       o	// /tmp/tmpagr4n4a3.mlir:1:63
+);
+
+  wire [19:0] _GEN = {arg0, arg1, arg2};	// /tmp/tmpagr4n4a3.mlir:2:8
+  wire [19:0] _GEN_0 = {arg0, arg1, arg2};	// /tmp/tmpagr4n4a3.mlir:3:8
+  assign o =
+    $signed(_GEN) &lt;= $signed(_GEN_0) &amp; $signed(_GEN) &gt;= $signed(_GEN_0) &amp; _GEN &lt;= _GEN_0
+    &amp; _GEN &gt;= _GEN_0 &amp; _GEN == _GEN_0;	// /tmp/tmpagr4n4a3.mlir:2:8, :3:8, :4:8, :5:8, :6:8, :7:8, :8:8, :9:8, :10:3
+endmodule
+
+module c2(	// /tmp/tmp34s7r2so.mlir:1:1
+  input  [3:0] arg0,	// /tmp/tmp34s7r2so.mlir:1:18
+  input  [8:0] arg1,	// /tmp/tmp34s7r2so.mlir:1:33
+  input  [6:0] arg2,	// /tmp/tmp34s7r2so.mlir:1:48
+  output       o	// /tmp/tmp34s7r2so.mlir:1:64
+);
+
+  assign o = 1&#x27;h1;	// /tmp/tmp34s7r2so.mlir:2:13, :3:5
+endmodule
+
+module tb;
+reg [3:0] arg0;
+reg [8:0] arg1;
+reg [6:0] arg2;
+wire b_o; wire a_o;
+c1 i1(.arg0(arg0), .arg1(arg1), .arg2(arg2), .o(b_o));
+c2 i2(.arg0(arg0), .arg1(arg1), .arg2(arg2), .o(a_o));
+initial begin
+  arg0 = 4&#x27;b0000;
+  arg1 = 9&#x27;b000000000;
+  arg2 = 7&#x27;bxxxxxxx;
+  #1;
+  $display(&quot;RESULT %s&quot;, ((b_o===a_o))?&quot;EQ&quot;:&quot;DIFF&quot;);
+  $display(&quot;  o before=%b after=%b&quot;, b_o, a_o);
+  $finish;
+end
+endmodule
+</pre></details>
+</section>
+<section class="card" id="compareConcatEliminationFalseCases">
+<h2>compareConcatEliminationFalseCases <span class="sub"><a href="https://github.com/llvm/circt/blob/main/test/Dialect/Comb/canonicalization.mlir#L405">canonicalization.mlir:405</a></span></h2>
+<p class="verdict"><span class="badge eq2">2-state: equiv</span> <span class="badge neq4">4-state: inequivalent</span> <span class="badge bin">bin-flag stripped</span></p>
+<p class="desc">Dual: <code>(x slt x)|(x sgt x)|…|(x!=x) → false</code>. With <code>X</code>, each disjunct is <code>X</code>, <code>or(X…)=X≠0</code>.</p>
+<div class="grid">
+<div><h3>Before <span class="sub">(original, bin stripped)</span></h3><pre>hw.module @c1(in %arg0 : i4, in %arg1 : i9, in %arg2: i7, out o : i1) {
+  %0 = comb.concat %arg0, %arg1, %arg2 : i4, i9, i7
+  %1 = comb.concat %arg0, %arg1, %arg2 : i4, i9, i7
+  %2 = comb.icmp slt %0, %1 : i20
+  %3 = comb.icmp sgt %0, %1 : i20
+  %4 = comb.icmp ult %0, %1 : i20
+  %5 = comb.icmp ugt %0, %1 : i20
+  %6 = comb.icmp  ne %0, %1 : i20
+  %o = comb.or %2, %3, %4, %5, %6 : i1
+  hw.output %o : i1
+}
+
+// CHECK-LABEL: @compareExtractFold
+</pre></div>
+<div><h3>After <span class="sub">(canonicalized)</span></h3><pre>hw.module @c2(in %arg0 : i4, in %arg1 : i9, in %arg2 : i7, out o : i1) {
+    %false = hw.constant false
+    hw.output %false : i1
+  }
+</pre></div>
+</div>
+<h3>Counterexample inputs <span class="sub">(dual-rail Z3 model → 0/1/X/Z, MSB first)</span></h3>
+<table><tr><th>input</th><th>type</th><th>4-state</th><th>val/poison</th></tr><tr><td><code>%arg0</code></td><td>i4</td><td class='four'>0000</code></td><td><code>v=0000 p=0000</code></td></tr><tr><td><code>%arg1</code></td><td>i9</td><td class='four'>000000000</code></td><td><code>v=000000000 p=000000000</code></td></tr><tr><td><code>%arg2</code></td><td>i7</td><td class='four'>XXXXXXX</code></td><td><code>v=0000000 p=1111111</code></td></tr></table>
+<h3>Outputs under counterexample <span class="sub">(evaluated with Verilog-like 4-state semantics — same as SMT encoding)</span></h3>
+<table><tr><th>port</th><th>type</th><th>before</th><th>after</th><th></th></tr><tr><td>out0</td><td>i1</td><td class='four'>X</td><td class='four'>0</td><td>✗ differ</td></tr></table>
+<p class="io">Before outputs: <code class='four'>X</code> <span class='sub'>(i1)</span><br>After outputs: <code class='four'>0</code> <span class='sub'>(i1)</span></p>
+<p class="note">Model: free 4-state inputs (X and Z allowed) where <code>distinct(out_before,out_after)</code> is SAT. <code>val&amp;pois</code> per bit decodes to <code>00=0,01=1,10=X,11=Z</code>. Outputs differ as full <code>2*N</code>-bit vectors (val and poison both compared). Computed with int-based 4-state interpreter matching the SMT encoding (<code>and/or</code> Kleene, <code>mux</code> agreement-else-X, <code>eq/ne</code> precise known-differ else X, ordered <code>any-X→X</code>).</p>
+<details><summary>Executable Verilog reproducer (hidden) — save as <code>repro.v</code>, run <code>iverilog -o sim repro.v && vvp sim</code></summary><pre>module c1(	// /tmp/tmpuz5_5yjm.mlir:1:1
+  input  [3:0] arg0,	// /tmp/tmpuz5_5yjm.mlir:1:18
+  input  [8:0] arg1,	// /tmp/tmpuz5_5yjm.mlir:1:33
+  input  [6:0] arg2,	// /tmp/tmpuz5_5yjm.mlir:1:48
+  output       o	// /tmp/tmpuz5_5yjm.mlir:1:63
+);
+
+  wire [19:0] _GEN = {arg0, arg1, arg2};	// /tmp/tmpuz5_5yjm.mlir:2:8
+  wire [19:0] _GEN_0 = {arg0, arg1, arg2};	// /tmp/tmpuz5_5yjm.mlir:3:8
+  assign o =
+    $signed(_GEN) &lt; $signed(_GEN_0) | $signed(_GEN) &gt; $signed(_GEN_0) | _GEN &lt; _GEN_0
+    | _GEN &gt; _GEN_0 | _GEN != _GEN_0;	// /tmp/tmpuz5_5yjm.mlir:2:8, :3:8, :4:8, :5:8, :6:8, :7:8, :8:8, :9:8, :10:3
+endmodule
+
+module c2(	// /tmp/tmpcnuw89nq.mlir:1:1
+  input  [3:0] arg0,	// /tmp/tmpcnuw89nq.mlir:1:18
+  input  [8:0] arg1,	// /tmp/tmpcnuw89nq.mlir:1:33
+  input  [6:0] arg2,	// /tmp/tmpcnuw89nq.mlir:1:48
+  output       o	// /tmp/tmpcnuw89nq.mlir:1:64
+);
+
+  assign o = 1&#x27;h0;	// /tmp/tmpcnuw89nq.mlir:2:14, :3:5
+endmodule
+
+module tb;
+reg [3:0] arg0;
+reg [8:0] arg1;
+reg [6:0] arg2;
+wire b_o; wire a_o;
+c1 i1(.arg0(arg0), .arg1(arg1), .arg2(arg2), .o(b_o));
+c2 i2(.arg0(arg0), .arg1(arg1), .arg2(arg2), .o(a_o));
+initial begin
+  arg0 = 4&#x27;b0000;
+  arg1 = 9&#x27;b000000000;
+  arg2 = 7&#x27;bxxxxxxx;
+  #1;
+  $display(&quot;RESULT %s&quot;, ((b_o===a_o))?&quot;EQ&quot;:&quot;DIFF&quot;);
+  $display(&quot;  o before=%b after=%b&quot;, b_o, a_o);
+  $finish;
+end
+endmodule
+</pre></details>
+</section>
+<section class="card" id="compareExtractFold">
+<h2>compareExtractFold <span class="sub"><a href="https://github.com/llvm/circt/blob/main/test/Dialect/Comb/canonicalization.mlir#L418">canonicalization.mlir:418</a></span></h2>
+<p class="verdict"><span class="badge eq2">2-state: equiv</span> <span class="badge neq4">4-state: inequivalent</span> <span class="badge bin">bin-flag stripped</span></p>
+<p class="desc"><b>Fold:</b> <code>ugt(x,3)→ne(extract(x,2..),0)</code> etc. <b>4-state:</b> comparison with <code>X</code> in ignored low bits still yields <code>X</code> for original <code>ugt/ult</code> (any X → X), while extracted <code>ne</code> on high bits can be known. E.g. <code>x=0000000X</code>: <code>x&gt;3</code> is <code>X</code>, but <code>extract(x,2..)=000000≠0 → false</code> (known).</p>
+<div class="grid">
+<div><h3>Before <span class="sub">(original, bin stripped)</span></h3><pre>hw.module @c1(in %arg0 : i8, out o1: i1, out o2: i1, out o3: i1) {
+  // x &gt; 0b00000011 -&gt; extract(x, 2..8) != 0b000000
+  %c3_i8 = hw.constant 3 : i8
+  %0 = comb.icmp ugt %arg0, %c3_i8 : i8
+  // CHECK: %0 = comb.extract %arg0 from 2 : (i8) -&gt; i6
+  // CHECK: %1 = comb.icmp ne %0, %c0_i6 : i6 
+
+  // x &lt; 0b11000000 -&gt; extract(x, 6..8) != 0b11
+  %c192_i8 = hw.constant 192 : i8
+  %1 = comb.icmp ult %arg0, %c192_i8 : i8
+  // CHECK: %2 = comb.extract %arg0 from 6 : (i8) -&gt; i2
+  // CHECK: %3 = comb.icmp ne %2, %c-1_i2 : i2
+
+  // The following used to be erroneously folded to `%arg0`.
+  %c0_i2 = hw.constant 0 : i2
+  %2 = comb.concat %c0_i2, %arg0 : i2, i8
+  %c768_i10 = hw.constant 768 : i10
+  %3 = comb.icmp ult %2, %c768_i10 : i10
+
+  // CHECK: hw.output %1, %3, %true :
+  hw.output %0, %1, %3 : i1, i1, i1
+}
+
+
+// Validates that extract(cat(a, b, c)) -&gt; cat(b, c) when it aligns with the exact elements, or simply
+// a when it is a single full element.
+// CHECK-LABEL: hw.module @extractCatAlignWithExactElements
+</pre></div>
+<div><h3>After <span class="sub">(canonicalized)</span></h3><pre>hw.module @c2(in %arg0 : i8, out o1 : i1, out o2 : i1, out o3 : i1) {
+    %true = hw.constant true
+    %c-1_i2 = hw.constant -1 : i2
+    %c0_i6 = hw.constant 0 : i6
+    %0 = comb.extract %arg0 from 2 : (i8) -&gt; i6
+    %1 = comb.icmp ne %0, %c0_i6 : i6
+    %2 = comb.extract %arg0 from 6 : (i8) -&gt; i2
+    %3 = comb.icmp ne %2, %c-1_i2 : i2
+    hw.output %1, %3, %true : i1, i1, i1
+  }
+</pre></div>
+</div>
+<h3>Counterexample inputs <span class="sub">(dual-rail Z3 model → 0/1/X/Z, MSB first)</span></h3>
+<table><tr><th>input</th><th>type</th><th>4-state</th><th>val/poison</th></tr><tr><td><code>%arg0</code></td><td>i8</td><td class='four'>XZ00ZZ0X</code></td><td><code>v=01001100 p=11001101</code></td></tr></table>
+<h3>Outputs under counterexample <span class="sub">(evaluated with Verilog-like 4-state semantics — same as SMT encoding)</span></h3>
+<table><tr><th>port</th><th>type</th><th>before</th><th>after</th><th></th></tr><tr><td>out0</td><td>i1</td><td class='four'>X</td><td class='four'>X</td><td>same</td></tr><tr><td>out1</td><td>i1</td><td class='four'>X</td><td class='four'>X</td><td>same</td></tr><tr><td>out2</td><td>i1</td><td class='four'>X</td><td class='four'>1</td><td>✗ differ</td></tr></table>
+<p class="io">Before outputs: <code class='four'>X</code> <span class='sub'>(i1)</span>, <code class='four'>X</code> <span class='sub'>(i1)</span>, <code class='four'>X</code> <span class='sub'>(i1)</span><br>After outputs: <code class='four'>X</code> <span class='sub'>(i1)</span>, <code class='four'>X</code> <span class='sub'>(i1)</span>, <code class='four'>1</code> <span class='sub'>(i1)</span></p>
+<p class="note">Model: free 4-state inputs (X and Z allowed) where <code>distinct(out_before,out_after)</code> is SAT. <code>val&amp;pois</code> per bit decodes to <code>00=0,01=1,10=X,11=Z</code>. Outputs differ as full <code>2*N</code>-bit vectors (val and poison both compared). Computed with int-based 4-state interpreter matching the SMT encoding (<code>and/or</code> Kleene, <code>mux</code> agreement-else-X, <code>eq/ne</code> precise known-differ else X, ordered <code>any-X→X</code>).</p>
+<details><summary>Executable Verilog reproducer (hidden) — save as <code>repro.v</code>, run <code>iverilog -o sim repro.v && vvp sim</code></summary><pre>module c1(	// /tmp/tmp7f2snxne.mlir:1:1
+  input  [7:0] arg0,	// /tmp/tmp7f2snxne.mlir:1:18
+  output       o1,	// /tmp/tmp7f2snxne.mlir:1:34
+               o2,	// /tmp/tmp7f2snxne.mlir:1:46
+               o3	// /tmp/tmp7f2snxne.mlir:1:58
+);
+
+  assign o1 = arg0 &gt; 8&#x27;h3;	// /tmp/tmp7f2snxne.mlir:3:12, :4:8, :21:3
+  assign o2 = arg0 &lt; 8&#x27;hC0;	// /tmp/tmp7f2snxne.mlir:9:14, :10:8, :21:3
+  assign o3 = {2&#x27;h0, arg0} &lt; 10&#x27;h300;	// /tmp/tmp7f2snxne.mlir:15:12, :16:8, :17:15, :18:8, :21:3
+endmodule
+
+module c2(	// /tmp/tmpao2xnbzi.mlir:1:1
+  input  [7:0] arg0,	// /tmp/tmpao2xnbzi.mlir:1:18
+  output       o1,	// /tmp/tmpao2xnbzi.mlir:1:34
+               o2,	// /tmp/tmpao2xnbzi.mlir:1:47
+               o3	// /tmp/tmpao2xnbzi.mlir:1:60
+);
+
+  assign o1 = |(arg0[7:2]);	// /tmp/tmpao2xnbzi.mlir:5:10, :6:10, :9:5
+  assign o2 = arg0[7:6] != 2&#x27;h3;	// /tmp/tmpao2xnbzi.mlir:3:15, :7:10, :8:10, :9:5
+  assign o3 = 1&#x27;h1;	// /tmp/tmpao2xnbzi.mlir:2:13, :9:5
+endmodule
+
+module tb;
+reg [7:0] arg0;
+wire b_o1; wire a_o1;
+wire b_o2; wire a_o2;
+wire b_o3; wire a_o3;
+c1 i1(.arg0(arg0), .o1(b_o1), .o2(b_o2), .o3(b_o3));
+c2 i2(.arg0(arg0), .o1(a_o1), .o2(a_o2), .o3(a_o3));
+initial begin
+  arg0 = 8&#x27;bxz00zz0x;
+  #1;
+  $display(&quot;RESULT %s&quot;, ((b_o1===a_o1) &amp;&amp; (b_o2===a_o2) &amp;&amp; (b_o3===a_o3))?&quot;EQ&quot;:&quot;DIFF&quot;);
+  $display(&quot;  o1 before=%b after=%b&quot;, b_o1, a_o1);
+  $display(&quot;  o2 before=%b after=%b&quot;, b_o2, a_o2);
+  $display(&quot;  o3 before=%b after=%b&quot;, b_o3, a_o3);
+  $finish;
+end
+endmodule
+</pre></details>
+</section>
+<section class="card" id="narrowAdditionSingleExtractUse">
+<h2>narrowAdditionSingleExtractUse <span class="sub"><a href="https://github.com/llvm/circt/blob/main/test/Dialect/Comb/canonicalization.mlir#L515">canonicalization.mlir:515</a></span></h2>
+<p class="verdict"><span class="badge eq2">2-state: equiv</span> <span class="badge neq4">4-state: inequivalent</span> <span class="badge bin">bin-flag stripped</span></p>
+<p class="desc"><b>Fold:</b> <code>extract(add(concat(0,x),concat(0,y)),0..6) → add(extract(x),extract(y))</code>. <b>4-state:</b> Verilog arithmetic is all-<code>X</code> pessimistic: any <code>X</code> in full 9-bit add (e.g. <code>y=XX111000</code> high bits X) makes original low extract <code>XXXXXX</code>, while narrowed 6-bit add drops those X bits and stays known.</p>
+<div class="grid">
+<div><h3>Before <span class="sub">(original, bin stripped)</span></h3><pre>hw.module @c1(in %x: i8, in %y: i8, out z1: i6) {
+  // CHECK-NEXT: [[RX:%.+]] = comb.extract %x from 0 : (i8) -&gt; i6
+  // CHECK-NEXT: [[RY:%.+]] = comb.extract %y from 0 : (i8) -&gt; i6
+  // CHECK-NEXT: [[RESULT:%.+]] = comb.add [[RX]], [[RY]] : i6
+  // CHECK-NEXT: hw.output [[RESULT]]
+
+  %false = hw.constant false
+  %0 = comb.concat %false, %x : i1, i8
+  %1 = comb.concat %false, %y : i1, i8
+  %2 = comb.add %0, %1 : i9
+  %3 = comb.extract %2 from 0 : (i9) -&gt; i6
+  hw.output %3 : i6
+}
+
+// Validates that addition narrows to the element itself without an extract
+// where possible.
+// CHECK-LABEL: hw.module @narrowAdditionToDirectAddition
+</pre></div>
+<div><h3>After <span class="sub">(canonicalized)</span></h3><pre>hw.module @c2(in %x : i8, in %y : i8, out z1 : i6) {
+    %0 = comb.extract %x from 0 : (i8) -&gt; i6
+    %1 = comb.extract %y from 0 : (i8) -&gt; i6
+    %2 = comb.add %0, %1 : i6
+    hw.output %2 : i6
+  }
+</pre></div>
+</div>
+<h3>Counterexample inputs <span class="sub">(dual-rail Z3 model → 0/1/X/Z, MSB first)</span></h3>
+<table><tr><th>input</th><th>type</th><th>4-state</th><th>val/poison</th></tr><tr><td><code>%x</code></td><td>i8</td><td class='four'>00000000</code></td><td><code>v=00000000 p=00000000</code></td></tr><tr><td><code>%y</code></td><td>i8</td><td class='four'>XX111000</code></td><td><code>v=00111000 p=11000000</code></td></tr></table>
+<h3>Outputs under counterexample <span class="sub">(evaluated with Verilog-like 4-state semantics — same as SMT encoding)</span></h3>
+<table><tr><th>port</th><th>type</th><th>before</th><th>after</th><th></th></tr><tr><td>out0</td><td>i6</td><td class='four'>XXXXXX</td><td class='four'>111000</td><td>✗ differ</td></tr></table>
+<p class="io">Before outputs: <code class='four'>XXXXXX</code> <span class='sub'>(i6)</span><br>After outputs: <code class='four'>111000</code> <span class='sub'>(i6)</span></p>
+<p class="note">Model: free 4-state inputs (X and Z allowed) where <code>distinct(out_before,out_after)</code> is SAT. <code>val&amp;pois</code> per bit decodes to <code>00=0,01=1,10=X,11=Z</code>. Outputs differ as full <code>2*N</code>-bit vectors (val and poison both compared). Computed with int-based 4-state interpreter matching the SMT encoding (<code>and/or</code> Kleene, <code>mux</code> agreement-else-X, <code>eq/ne</code> precise known-differ else X, ordered <code>any-X→X</code>).</p>
+<details><summary>Executable Verilog reproducer (hidden) — save as <code>repro.v</code>, run <code>iverilog -o sim repro.v && vvp sim</code></summary><pre>module c1(	// /tmp/tmpc3tq744p.mlir:1:1
+  input  [7:0] x,	// /tmp/tmpc3tq744p.mlir:1:18
+               y,	// /tmp/tmpc3tq744p.mlir:1:29
+  output [5:0] z1	// /tmp/tmpc3tq744p.mlir:1:41
+);
+
+  wire [8:0] _GEN = {1&#x27;h0, x} + {1&#x27;h0, y};	// /tmp/tmpc3tq744p.mlir:7:12, :8:8, :9:8, :10:8
+  assign z1 = _GEN[5:0];	// /tmp/tmpc3tq744p.mlir:10:8, :11:8, :12:3
+endmodule
+
+module c2(	// /tmp/tmp7oaj09r_.mlir:1:1
+  input  [7:0] x,	// /tmp/tmp7oaj09r_.mlir:1:18
+               y,	// /tmp/tmp7oaj09r_.mlir:1:30
+  output [5:0] z1	// /tmp/tmp7oaj09r_.mlir:1:43
+);
+
+  assign z1 = x[5:0] + y[5:0];	// /tmp/tmp7oaj09r_.mlir:2:10, :3:10, :4:10, :5:5
+endmodule
+
+module tb;
+reg [7:0] x;
+reg [7:0] y;
+wire [5:0] b_z1; wire [5:0] a_z1;
+c1 i1(.x(x), .y(y), .z1(b_z1));
+c2 i2(.x(x), .y(y), .z1(a_z1));
+initial begin
+  x = 8&#x27;b00000000;
+  y = 8&#x27;bxx111000;
+  #1;
+  $display(&quot;RESULT %s&quot;, ((b_z1===a_z1))?&quot;EQ&quot;:&quot;DIFF&quot;);
+  $display(&quot;  z1 before=%b after=%b&quot;, b_z1, a_z1);
+  $finish;
+end
+endmodule
+</pre></details>
+</section>
+<section class="card" id="narrowAdditionToWidestExtract">
+<h2>narrowAdditionToWidestExtract <span class="sub"><a href="https://github.com/llvm/circt/blob/main/test/Dialect/Comb/canonicalization.mlir#L560">canonicalization.mlir:560</a></span></h2>
+<p class="verdict"><span class="badge eq2">2-state: equiv</span> <span class="badge neq4">4-state: inequivalent</span> <span class="badge bin">bin-flag stripped</span></p>
+<p class="desc">Same narrowing unsoundness for <code>add(concat(x,x),concat(y,y))</code>: high-half X forces original low extracts to <code>X</code>, narrowed version drops them.</p>
+<div class="grid">
+<div><h3>Before <span class="sub">(original, bin stripped)</span></h3><pre>hw.module @c1(in %x: i8, in %y: i8, out z1: i3, out z2: i4) {
+  // CHECK-NEXT: [[RX:%.+]] = comb.extract %x from 0 : (i8) -&gt; i4
+  // CHECK-NEXT: [[RY:%.+]] = comb.extract %y from 0 : (i8) -&gt; i4
+  // CHECK-NEXT: [[RESULT2:%.+]] = comb.add [[RX]], [[RY]] : i4
+  // CHECK-NEXT: [[RESULT1:%.+]] = comb.extract [[RESULT2]] from 0 : (i4) -&gt; i3
+  // CHECK-NEXT: hw.output [[RESULT1]], [[RESULT2]]
+
+  %0 = comb.concat %x, %x : i8, i8
+  %1 = comb.concat %y, %y : i8, i8
+  %2 = comb.add %0, %1 : i16
+  %3 = comb.extract %2 from 0 : (i16) -&gt; i3
+  %4 = comb.extract %2 from 0 : (i16) -&gt; i4
+  hw.output %3, %4 : i3, i4
+}
+
+// Validates that addition narrow to the widest extract
+// CHECK-LABEL: hw.module @narrowAdditionStripLeadingZero
+</pre></div>
+<div><h3>After <span class="sub">(canonicalized)</span></h3><pre>hw.module @c2(in %x : i8, in %y : i8, out z1 : i3, out z2 : i4) {
+    %0 = comb.extract %x from 0 : (i8) -&gt; i4
+    %1 = comb.extract %y from 0 : (i8) -&gt; i4
+    %2 = comb.add %0, %1 : i4
+    %3 = comb.extract %2 from 0 : (i4) -&gt; i3
+    hw.output %3, %2 : i3, i4
+  }
+</pre></div>
+</div>
+<h3>Counterexample inputs <span class="sub">(dual-rail Z3 model → 0/1/X/Z, MSB first)</span></h3>
+<table><tr><th>input</th><th>type</th><th>4-state</th><th>val/poison</th></tr><tr><td><code>%x</code></td><td>i8</td><td class='four'>XX000101</code></td><td><code>v=00000101 p=11000000</code></td></tr><tr><td><code>%y</code></td><td>i8</td><td class='four'>X0XX1000</code></td><td><code>v=00001000 p=10110000</code></td></tr></table>
+<h3>Outputs under counterexample <span class="sub">(evaluated with Verilog-like 4-state semantics — same as SMT encoding)</span></h3>
+<table><tr><th>port</th><th>type</th><th>before</th><th>after</th><th></th></tr><tr><td>out0</td><td>i3</td><td class='four'>XXX</td><td class='four'>101</td><td>✗ differ</td></tr><tr><td>out1</td><td>i4</td><td class='four'>XXXX</td><td class='four'>1101</td><td>✗ differ</td></tr></table>
+<p class="io">Before outputs: <code class='four'>XXX</code> <span class='sub'>(i3)</span>, <code class='four'>XXXX</code> <span class='sub'>(i4)</span><br>After outputs: <code class='four'>101</code> <span class='sub'>(i3)</span>, <code class='four'>1101</code> <span class='sub'>(i4)</span></p>
+<p class="note">Model: free 4-state inputs (X and Z allowed) where <code>distinct(out_before,out_after)</code> is SAT. <code>val&amp;pois</code> per bit decodes to <code>00=0,01=1,10=X,11=Z</code>. Outputs differ as full <code>2*N</code>-bit vectors (val and poison both compared). Computed with int-based 4-state interpreter matching the SMT encoding (<code>and/or</code> Kleene, <code>mux</code> agreement-else-X, <code>eq/ne</code> precise known-differ else X, ordered <code>any-X→X</code>).</p>
+<details><summary>Executable Verilog reproducer (hidden) — save as <code>repro.v</code>, run <code>iverilog -o sim repro.v && vvp sim</code></summary><pre>module c1(	// /tmp/tmpks5xawp9.mlir:1:1
+  input  [7:0] x,	// /tmp/tmpks5xawp9.mlir:1:18
+               y,	// /tmp/tmpks5xawp9.mlir:1:29
+  output [2:0] z1,	// /tmp/tmpks5xawp9.mlir:1:41
+  output [3:0] z2	// /tmp/tmpks5xawp9.mlir:1:53
+);
+
+  wire [15:0] _GEN = {x, x} + {y, y};	// /tmp/tmpks5xawp9.mlir:8:8, :9:8, :10:8
+  assign z1 = _GEN[2:0];	// /tmp/tmpks5xawp9.mlir:10:8, :11:8, :13:3
+  assign z2 = _GEN[3:0];	// /tmp/tmpks5xawp9.mlir:10:8, :12:8, :13:3
+endmodule
+
+module c2(	// /tmp/tmp0yxg51uf.mlir:1:1
+  input  [7:0] x,	// /tmp/tmp0yxg51uf.mlir:1:18
+               y,	// /tmp/tmp0yxg51uf.mlir:1:30
+  output [2:0] z1,	// /tmp/tmp0yxg51uf.mlir:1:43
+  output [3:0] z2	// /tmp/tmp0yxg51uf.mlir:1:56
+);
+
+  wire [3:0] _GEN = x[3:0] + y[3:0];	// /tmp/tmp0yxg51uf.mlir:2:10, :3:10, :4:10
+  assign z1 = _GEN[2:0];	// /tmp/tmp0yxg51uf.mlir:4:10, :5:10, :6:5
+  assign z2 = _GEN;	// /tmp/tmp0yxg51uf.mlir:4:10, :6:5
+endmodule
+
+module tb;
+reg [7:0] x;
+reg [7:0] y;
+wire [2:0] b_z1; wire [2:0] a_z1;
+wire [3:0] b_z2; wire [3:0] a_z2;
+c1 i1(.x(x), .y(y), .z1(b_z1), .z2(b_z2));
+c2 i2(.x(x), .y(y), .z1(a_z1), .z2(a_z2));
+initial begin
+  x = 8&#x27;bxx000101;
+  y = 8&#x27;bx0xx1000;
+  #1;
+  $display(&quot;RESULT %s&quot;, ((b_z1===a_z1) &amp;&amp; (b_z2===a_z2))?&quot;EQ&quot;:&quot;DIFF&quot;);
+  $display(&quot;  z1 before=%b after=%b&quot;, b_z1, a_z1);
+  $display(&quot;  z2 before=%b after=%b&quot;, b_z2, a_z2);
+  $finish;
+end
+endmodule
+</pre></details>
+</section>
+<section class="card" id="narrowAdditionExtractFromNoneZero">
+<h2>narrowAdditionExtractFromNoneZero <span class="sub"><a href="https://github.com/llvm/circt/blob/main/test/Dialect/Comb/canonicalization.mlir#L611">canonicalization.mlir:611</a></span></h2>
+<p class="verdict"><span class="badge eq2">2-state: equiv</span> <span class="badge neq4">4-state: inequivalent</span> <span class="badge bin">bin-flag stripped</span></p>
+<p class="desc"><b>Fold:</b> <code>extract(add(x,y),1..4) → extract(add(extract(x,0..5),extract(y,0..5)),1..4)</code>. Dropping bits 5..7 that contain <code>X</code> changes all-<code>X</code> to known.</p>
+<div class="grid">
+<div><h3>Before <span class="sub">(original, bin stripped)</span></h3><pre>hw.module @c1(in %x: i8, in %y: i8, out z0: i4) {
+  // CHECK-NEXT: [[RX:%.+]] = comb.extract %x from 0 : (i8) -&gt; i5
+  // CHECK-NEXT: [[RY:%.+]] = comb.extract %y from 0 : (i8) -&gt; i5
+  // CHECK-NEXT: [[ADD:%.+]] = comb.add [[RX]], [[RY]] : i5
+  // CHECK-NEXT: [[RET:%.+]] = comb.extract [[ADD]] from 1 : (i5) -&gt; i4
+  // CHECK-NEXT: hw.output [[RET]]
+
+  %0 = comb.add %x, %y : i8
+  %1 = comb.extract %0 from 1 : (i8) -&gt; i4
+  hw.output %1 : i4
+}
+
+// Validates that subtraction narrowing retains the lower bits when not extracting from
+// zero.
+// CHECK-LABEL: hw.module @narrowSubExtractFromNoneZero
+</pre></div>
+<div><h3>After <span class="sub">(canonicalized)</span></h3><pre>hw.module @c2(in %x : i8, in %y : i8, out z0 : i4) {
+    %0 = comb.extract %x from 0 : (i8) -&gt; i5
+    %1 = comb.extract %y from 0 : (i8) -&gt; i5
+    %2 = comb.add %0, %1 : i5
+    %3 = comb.extract %2 from 1 : (i5) -&gt; i4
+    hw.output %3 : i4
+  }
+</pre></div>
+</div>
+<h3>Counterexample inputs <span class="sub">(dual-rail Z3 model → 0/1/X/Z, MSB first)</span></h3>
+<table><tr><th>input</th><th>type</th><th>4-state</th><th>val/poison</th></tr><tr><td><code>%x</code></td><td>i8</td><td class='four'>XXX01010</code></td><td><code>v=00001010 p=11100000</code></td></tr><tr><td><code>%y</code></td><td>i8</td><td class='four'>X0X10000</code></td><td><code>v=00010000 p=10100000</code></td></tr></table>
+<h3>Outputs under counterexample <span class="sub">(evaluated with Verilog-like 4-state semantics — same as SMT encoding)</span></h3>
+<table><tr><th>port</th><th>type</th><th>before</th><th>after</th><th></th></tr><tr><td>out0</td><td>i4</td><td class='four'>XXXX</td><td class='four'>1101</td><td>✗ differ</td></tr></table>
+<p class="io">Before outputs: <code class='four'>XXXX</code> <span class='sub'>(i4)</span><br>After outputs: <code class='four'>1101</code> <span class='sub'>(i4)</span></p>
+<p class="note">Model: free 4-state inputs (X and Z allowed) where <code>distinct(out_before,out_after)</code> is SAT. <code>val&amp;pois</code> per bit decodes to <code>00=0,01=1,10=X,11=Z</code>. Outputs differ as full <code>2*N</code>-bit vectors (val and poison both compared). Computed with int-based 4-state interpreter matching the SMT encoding (<code>and/or</code> Kleene, <code>mux</code> agreement-else-X, <code>eq/ne</code> precise known-differ else X, ordered <code>any-X→X</code>).</p>
+<details><summary>Executable Verilog reproducer (hidden) — save as <code>repro.v</code>, run <code>iverilog -o sim repro.v && vvp sim</code></summary><pre>module c1(	// /tmp/tmplwx4v5gk.mlir:1:1
+  input  [7:0] x,	// /tmp/tmplwx4v5gk.mlir:1:18
+               y,	// /tmp/tmplwx4v5gk.mlir:1:29
+  output [3:0] z0	// /tmp/tmplwx4v5gk.mlir:1:41
+);
+
+  wire [7:0] _GEN = x + y;	// /tmp/tmplwx4v5gk.mlir:8:8
+  assign z0 = _GEN[4:1];	// /tmp/tmplwx4v5gk.mlir:8:8, :9:8, :10:3
+endmodule
+
+module c2(	// /tmp/tmpo5v2ca9d.mlir:1:1
+  input  [7:0] x,	// /tmp/tmpo5v2ca9d.mlir:1:18
+               y,	// /tmp/tmpo5v2ca9d.mlir:1:30
+  output [3:0] z0	// /tmp/tmpo5v2ca9d.mlir:1:43
+);
+
+  wire [4:0] _GEN = x[4:0] + y[4:0];	// /tmp/tmpo5v2ca9d.mlir:2:10, :3:10, :4:10
+  assign z0 = _GEN[4:1];	// /tmp/tmpo5v2ca9d.mlir:4:10, :5:10, :6:5
+endmodule
+
+module tb;
+reg [7:0] x;
+reg [7:0] y;
+wire [3:0] b_z0; wire [3:0] a_z0;
+c1 i1(.x(x), .y(y), .z0(b_z0));
+c2 i2(.x(x), .y(y), .z0(a_z0));
+initial begin
+  x = 8&#x27;bxxx01010;
+  y = 8&#x27;bx0x10000;
+  #1;
+  $display(&quot;RESULT %s&quot;, ((b_z0===a_z0))?&quot;EQ&quot;:&quot;DIFF&quot;);
+  $display(&quot;  z0 before=%b after=%b&quot;, b_z0, a_z0);
+  $finish;
+end
+endmodule
+</pre></details>
+</section>
+<section class="card" id="narrowSubExtractFromNoneZero">
+<h2>narrowSubExtractFromNoneZero <span class="sub"><a href="https://github.com/llvm/circt/blob/main/test/Dialect/Comb/canonicalization.mlir#L626">canonicalization.mlir:626</a></span></h2>
+<p class="verdict"><span class="badge eq2">2-state: equiv</span> <span class="badge neq4">4-state: inequivalent</span> <span class="badge bin">bin-flag stripped</span></p>
+<p class="desc">Same for <code>sub</code>: <code>X</code> in discarded high bits makes original <code>sub</code> all-<code>X</code>.</p>
+<div class="grid">
+<div><h3>Before <span class="sub">(original, bin stripped)</span></h3><pre>hw.module @c1(in %x: i8, in %y: i8, out z0: i4) {
+  // CHECK-NEXT: [[RX:%.+]] = comb.extract %x from 0 : (i8) -&gt; i5
+  // CHECK-NEXT: [[RY:%.+]] = comb.extract %y from 0 : (i8) -&gt; i5
+  // CHECK-NEXT: [[ADD:%.+]] = comb.sub [[RX]], [[RY]] : i5
+  // CHECK-NEXT: [[RET:%.+]] = comb.extract [[ADD]] from 1 : (i5) -&gt; i4
+  // CHECK-NEXT: hw.output [[RET]]
+
+  %0 = comb.sub %x, %y : i8
+  %1 = comb.extract %0 from 1 : (i8) -&gt; i4
+  hw.output %1 : i4
+}
+
+// Validates that subtraction narrowing retains the lower bits when not extracting from
+// zero.
+// CHECK-LABEL: hw.module @narrowMulExtractFromNoneZero
+</pre></div>
+<div><h3>After <span class="sub">(canonicalized)</span></h3><pre>hw.module @c2(in %x : i8, in %y : i8, out z0 : i4) {
+    %0 = comb.extract %x from 0 : (i8) -&gt; i5
+    %1 = comb.extract %y from 0 : (i8) -&gt; i5
+    %2 = comb.sub %0, %1 : i5
+    %3 = comb.extract %2 from 1 : (i5) -&gt; i4
+    hw.output %3 : i4
+  }
+</pre></div>
+</div>
+<h3>Counterexample inputs <span class="sub">(dual-rail Z3 model → 0/1/X/Z, MSB first)</span></h3>
+<table><tr><th>input</th><th>type</th><th>4-state</th><th>val/poison</th></tr><tr><td><code>%x</code></td><td>i8</td><td class='four'>0X000100</code></td><td><code>v=00000100 p=01000000</code></td></tr><tr><td><code>%y</code></td><td>i8</td><td class='four'>0X010000</code></td><td><code>v=00010000 p=01000000</code></td></tr></table>
+<h3>Outputs under counterexample <span class="sub">(evaluated with Verilog-like 4-state semantics — same as SMT encoding)</span></h3>
+<table><tr><th>port</th><th>type</th><th>before</th><th>after</th><th></th></tr><tr><td>out0</td><td>i4</td><td class='four'>XXXX</td><td class='four'>1010</td><td>✗ differ</td></tr></table>
+<p class="io">Before outputs: <code class='four'>XXXX</code> <span class='sub'>(i4)</span><br>After outputs: <code class='four'>1010</code> <span class='sub'>(i4)</span></p>
+<p class="note">Model: free 4-state inputs (X and Z allowed) where <code>distinct(out_before,out_after)</code> is SAT. <code>val&amp;pois</code> per bit decodes to <code>00=0,01=1,10=X,11=Z</code>. Outputs differ as full <code>2*N</code>-bit vectors (val and poison both compared). Computed with int-based 4-state interpreter matching the SMT encoding (<code>and/or</code> Kleene, <code>mux</code> agreement-else-X, <code>eq/ne</code> precise known-differ else X, ordered <code>any-X→X</code>).</p>
+<details><summary>Executable Verilog reproducer (hidden) — save as <code>repro.v</code>, run <code>iverilog -o sim repro.v && vvp sim</code></summary><pre>module c1(	// /tmp/tmpsf_wxrjp.mlir:1:1
+  input  [7:0] x,	// /tmp/tmpsf_wxrjp.mlir:1:18
+               y,	// /tmp/tmpsf_wxrjp.mlir:1:29
+  output [3:0] z0	// /tmp/tmpsf_wxrjp.mlir:1:41
+);
+
+  wire [7:0] _GEN = x - y;	// /tmp/tmpsf_wxrjp.mlir:8:8
+  assign z0 = _GEN[4:1];	// /tmp/tmpsf_wxrjp.mlir:8:8, :9:8, :10:3
+endmodule
+
+module c2(	// /tmp/tmp3fy3w4dc.mlir:1:1
+  input  [7:0] x,	// /tmp/tmp3fy3w4dc.mlir:1:18
+               y,	// /tmp/tmp3fy3w4dc.mlir:1:30
+  output [3:0] z0	// /tmp/tmp3fy3w4dc.mlir:1:43
+);
+
+  wire [4:0] _GEN = x[4:0] - y[4:0];	// /tmp/tmp3fy3w4dc.mlir:2:10, :3:10, :4:10
+  assign z0 = _GEN[4:1];	// /tmp/tmp3fy3w4dc.mlir:4:10, :5:10, :6:5
+endmodule
+
+module tb;
+reg [7:0] x;
+reg [7:0] y;
+wire [3:0] b_z0; wire [3:0] a_z0;
+c1 i1(.x(x), .y(y), .z0(b_z0));
+c2 i2(.x(x), .y(y), .z0(a_z0));
+initial begin
+  x = 8&#x27;b0x000100;
+  y = 8&#x27;b0x010000;
+  #1;
+  $display(&quot;RESULT %s&quot;, ((b_z0===a_z0))?&quot;EQ&quot;:&quot;DIFF&quot;);
+  $display(&quot;  z0 before=%b after=%b&quot;, b_z0, a_z0);
+  $finish;
+end
+endmodule
+</pre></details>
+</section>
+<section class="card" id="narrowMulExtractFromNoneZero">
+<h2>narrowMulExtractFromNoneZero <span class="sub"><a href="https://github.com/llvm/circt/blob/main/test/Dialect/Comb/canonicalization.mlir#L641">canonicalization.mlir:641</a></span></h2>
+<p class="verdict"><span class="badge eq2">2-state: equiv</span> <span class="badge neq4">4-state: inequivalent</span> <span class="badge bin">bin-flag stripped</span></p>
+<p class="desc">Same for <code>mul</code>.</p>
+<div class="grid">
+<div><h3>Before <span class="sub">(original, bin stripped)</span></h3><pre>hw.module @c1(in %x: i8, in %y: i8, out z0: i4) {
+  // CHECK-NEXT: [[RX:%.+]] = comb.extract %x from 0 : (i8) -&gt; i5
+  // CHECK-NEXT: [[RY:%.+]] = comb.extract %y from 0 : (i8) -&gt; i5
+  // CHECK-NEXT: [[ADD:%.+]] = comb.mul [[RX]], [[RY]] : i5
+  // CHECK-NEXT: [[RET:%.+]] = comb.extract [[ADD]] from 1 : (i5) -&gt; i4
+  // CHECK-NEXT: hw.output [[RET]]
+
+  %0 = comb.mul %x, %y : i8
+  %1 = comb.extract %0 from 1 : (i8) -&gt; i4
+  hw.output %1 : i4
+}
+
+// Validates that bitwise operation does not retain the lower bit when extracting from
+// non-zero.
+// CHECK-LABEL: hw.module @narrowBitwiseOpsExtractFromNoneZero
+</pre></div>
+<div><h3>After <span class="sub">(canonicalized)</span></h3><pre>hw.module @c2(in %x : i8, in %y : i8, out z0 : i4) {
+    %0 = comb.extract %x from 0 : (i8) -&gt; i5
+    %1 = comb.extract %y from 0 : (i8) -&gt; i5
+    %2 = comb.mul %0, %1 : i5
+    %3 = comb.extract %2 from 1 : (i5) -&gt; i4
+    hw.output %3 : i4
+  }
+</pre></div>
+</div>
+<h3>Counterexample inputs <span class="sub">(dual-rail Z3 model → 0/1/X/Z, MSB first)</span></h3>
+<table><tr><th>input</th><th>type</th><th>4-state</th><th>val/poison</th></tr><tr><td><code>%x</code></td><td>i8</td><td class='four'>00010101</code></td><td><code>v=00010101 p=00000000</code></td></tr><tr><td><code>%y</code></td><td>i8</td><td class='four'>0XX11101</code></td><td><code>v=00011101 p=01100000</code></td></tr></table>
+<h3>Outputs under counterexample <span class="sub">(evaluated with Verilog-like 4-state semantics — same as SMT encoding)</span></h3>
+<table><tr><th>port</th><th>type</th><th>before</th><th>after</th><th></th></tr><tr><td>out0</td><td>i4</td><td class='four'>XXXX</td><td class='four'>0000</td><td>✗ differ</td></tr></table>
+<p class="io">Before outputs: <code class='four'>XXXX</code> <span class='sub'>(i4)</span><br>After outputs: <code class='four'>0000</code> <span class='sub'>(i4)</span></p>
+<p class="note">Model: free 4-state inputs (X and Z allowed) where <code>distinct(out_before,out_after)</code> is SAT. <code>val&amp;pois</code> per bit decodes to <code>00=0,01=1,10=X,11=Z</code>. Outputs differ as full <code>2*N</code>-bit vectors (val and poison both compared). Computed with int-based 4-state interpreter matching the SMT encoding (<code>and/or</code> Kleene, <code>mux</code> agreement-else-X, <code>eq/ne</code> precise known-differ else X, ordered <code>any-X→X</code>).</p>
+<details><summary>Executable Verilog reproducer (hidden) — save as <code>repro.v</code>, run <code>iverilog -o sim repro.v && vvp sim</code></summary><pre>module c1(	// /tmp/tmpxfkv8fct.mlir:1:1
+  input  [7:0] x,	// /tmp/tmpxfkv8fct.mlir:1:18
+               y,	// /tmp/tmpxfkv8fct.mlir:1:29
+  output [3:0] z0	// /tmp/tmpxfkv8fct.mlir:1:41
+);
+
+  wire [7:0] _GEN = x * y;	// /tmp/tmpxfkv8fct.mlir:8:8
+  assign z0 = _GEN[4:1];	// /tmp/tmpxfkv8fct.mlir:8:8, :9:8, :10:3
+endmodule
+
+module c2(	// /tmp/tmpqb39wg2l.mlir:1:1
+  input  [7:0] x,	// /tmp/tmpqb39wg2l.mlir:1:18
+               y,	// /tmp/tmpqb39wg2l.mlir:1:30
+  output [3:0] z0	// /tmp/tmpqb39wg2l.mlir:1:43
+);
+
+  wire [4:0] _GEN = x[4:0] * y[4:0];	// /tmp/tmpqb39wg2l.mlir:2:10, :3:10, :4:10
+  assign z0 = _GEN[4:1];	// /tmp/tmpqb39wg2l.mlir:4:10, :5:10, :6:5
+endmodule
+
+module tb;
+reg [7:0] x;
+reg [7:0] y;
+wire [3:0] b_z0; wire [3:0] a_z0;
+c1 i1(.x(x), .y(y), .z0(b_z0));
+c2 i2(.x(x), .y(y), .z0(a_z0));
+initial begin
+  x = 8&#x27;b00010101;
+  y = 8&#x27;b0xx11101;
+  #1;
+  $display(&quot;RESULT %s&quot;, ((b_z0===a_z0))?&quot;EQ&quot;:&quot;DIFF&quot;);
+  $display(&quot;  z0 before=%b after=%b&quot;, b_z0, a_z0);
+  $finish;
+end
+endmodule
+</pre></details>
+</section>
+<section class="card" id="narrow_extract_from_and">
+<h2>narrow_extract_from_and <span class="sub"><a href="https://github.com/llvm/circt/blob/main/test/Dialect/Comb/canonicalization.mlir#L732">canonicalization.mlir:732</a></span></h2>
+<p class="verdict"><span class="badge eq2">2-state: equiv</span> <span class="badge neq4">4-state: inequivalent</span> <span class="badge bin">bin-flag stripped</span></p>
+<p class="desc"><b>Fold:</b> <code>extract(and(arg,mask)) → and(extract(arg),…)/concat(0,…)</code> pushing extract through <code>and</code>-with-constant. <b>4-state:</b> <code>and</code> collapses <code>Z→X</code> (<code>Z&amp;1=X</code>), while extract-then-concat preserves <code>Z</code> in padding. Counterexample contains <code>Z</code> bits showing <code>X vs Z</code> mismatch.</p>
+<div class="grid">
+<div><h3>Before <span class="sub">(original, bin stripped)</span></h3><pre>hw.module @c1(in %arg0 : i32, out o1: i8, out o2: i14, out o3: i8, out o4: i8) {
+  %c240_i32 = hw.constant 240 : i32  // 0xF0
+  %0 = comb.and %arg0, %c240_i32 : i32
+  %1 = comb.extract %0 from 3 : (i32) -&gt; i8
+
+  %2 = comb.extract %0 from 2 : (i32) -&gt; i14
+
+  // CHECK: %0 = comb.extract %arg0 from 4 : (i32) -&gt; i4
+  // CHECK: %1 = comb.concat %c0_i3, %0, %false : i3, i4, i1
+  // CHECK: %2 = comb.concat %c0_i8, %0, %c0_i2 : i8, i4, i2
+
+  %c42_i32 = hw.constant 42 : i32  // 0b101010
+  %3 = comb.and %arg0, %c42_i32 : i32
+  %4 = comb.extract %3 from 1 : (i32) -&gt; i8  
+  // CHECK: %3 = comb.extract %arg0 from 1 : (i32) -&gt; i5
+  // CHECK: %4 = comb.and %3, %c-11_i5 : i5
+  // CHECK: %5 = comb.concat %c0_i3, %4 : i3, i5
+
+  %c12_i8 = hw.constant 12 : i8
+  %5 = comb.extract %arg0 from 23 : (i32) -&gt; i8
+  %6 = comb.and %5, %c12_i8 : i8
+  // CHECK: %6 = comb.extract %arg0 from 25 : (i32) -&gt; i2
+  // CHECK: %7 = comb.concat %c0_i4, %6, %c0_i2 : i4, i2, i2
+ 
+  hw.output %1, %2, %4, %6 : i8, i14, i8, i8
+  // CHECK: hw.output %1, %2, %5, %7 : i8, i14, i8, i8
+}
+
+// CHECK-LABEL: hw.module @fold_mux_tree1
+</pre></div>
+<div><h3>After <span class="sub">(canonicalized)</span></h3><pre>hw.module @c2(in %arg0 : i32, out o1 : i8, out o2 : i14, out o3 : i8, out o4 : i8) {
+    %c0_i4 = hw.constant 0 : i4
+    %c-11_i5 = hw.constant -11 : i5
+    %c0_i8 = hw.constant 0 : i8
+    %c0_i2 = hw.constant 0 : i2
+    %c0_i3 = hw.constant 0 : i3
+    %false = hw.constant false
+    %0 = comb.extract %arg0 from 4 : (i32) -&gt; i4
+    %1 = comb.concat %c0_i3, %0, %false : i3, i4, i1
+    %2 = comb.concat %c0_i8, %0, %c0_i2 : i8, i4, i2
+    %3 = comb.extract %arg0 from 1 : (i32) -&gt; i5
+    %4 = comb.and %3, %c-11_i5 : i5
+    %5 = comb.concat %c0_i3, %4 : i3, i5
+    %6 = comb.extract %arg0 from 25 : (i32) -&gt; i2
+    %7 = comb.concat %c0_i4, %6, %c0_i2 : i4, i2, i2
+    hw.output %1, %2, %5, %7 : i8, i14, i8, i8
+  }
+</pre></div>
+</div>
+<h3>Counterexample inputs <span class="sub">(dual-rail Z3 model → 0/1/X/Z, MSB first)</span></h3>
+<table><tr><th>input</th><th>type</th><th>4-state</th><th>val/poison</th></tr><tr><td><code>%arg0</code></td><td>i32</td><td class='four'>000000Z00000000000000000ZZZZ0000</code></td><td><code>v=00000010000000000000000011110000 p=00000010000000000000000011110000</code></td></tr></table>
+<h3>Outputs under counterexample <span class="sub">(evaluated with Verilog-like 4-state semantics — same as SMT encoding)</span></h3>
+<table><tr><th>port</th><th>type</th><th>before</th><th>after</th><th></th></tr><tr><td>out0</td><td>i8</td><td class='four'>000XXXX0</td><td class='four'>000ZZZZ0</td><td>✗ differ</td></tr><tr><td>out1</td><td>i14</td><td class='four'>00000000XXXX00</td><td class='four'>00000000ZZZZ00</td><td>✗ differ</td></tr><tr><td>out2</td><td>i8</td><td class='four'>000X0000</td><td class='four'>000X0000</td><td>same</td></tr><tr><td>out3</td><td>i8</td><td class='four'>00000X00</td><td class='four'>00000Z00</td><td>✗ differ</td></tr></table>
+<p class="io">Before outputs: <code class='four'>000XXXX0</code> <span class='sub'>(i8)</span>, <code class='four'>00000000XXXX00</code> <span class='sub'>(i14)</span>, <code class='four'>000X0000</code> <span class='sub'>(i8)</span>, <code class='four'>00000X00</code> <span class='sub'>(i8)</span><br>After outputs: <code class='four'>000ZZZZ0</code> <span class='sub'>(i8)</span>, <code class='four'>00000000ZZZZ00</code> <span class='sub'>(i14)</span>, <code class='four'>000X0000</code> <span class='sub'>(i8)</span>, <code class='four'>00000Z00</code> <span class='sub'>(i8)</span></p>
+<p class="note">Model: free 4-state inputs (X and Z allowed) where <code>distinct(out_before,out_after)</code> is SAT. <code>val&amp;pois</code> per bit decodes to <code>00=0,01=1,10=X,11=Z</code>. Outputs differ as full <code>2*N</code>-bit vectors (val and poison both compared). Computed with int-based 4-state interpreter matching the SMT encoding (<code>and/or</code> Kleene, <code>mux</code> agreement-else-X, <code>eq/ne</code> precise known-differ else X, ordered <code>any-X→X</code>).</p>
+<details><summary>Executable Verilog reproducer (hidden) — save as <code>repro.v</code>, run <code>iverilog -o sim repro.v && vvp sim</code></summary><pre>module c1(	// /tmp/tmp5xcr08v3.mlir:1:1
+  input  [31:0] arg0,	// /tmp/tmp5xcr08v3.mlir:1:18
+  output [7:0]  o1,	// /tmp/tmp5xcr08v3.mlir:1:35
+  output [13:0] o2,	// /tmp/tmp5xcr08v3.mlir:1:47
+  output [7:0]  o3,	// /tmp/tmp5xcr08v3.mlir:1:60
+                o4	// /tmp/tmp5xcr08v3.mlir:1:72
+);
+
+  wire [31:0] _GEN = arg0 &amp; 32&#x27;hF0;	// /tmp/tmp5xcr08v3.mlir:2:15, :3:8
+  wire [31:0] _GEN_0 = arg0 &amp; 32&#x27;h2A;	// /tmp/tmp5xcr08v3.mlir:12:14, :13:8
+  assign o1 = _GEN[10:3];	// /tmp/tmp5xcr08v3.mlir:3:8, :4:8, :25:3
+  assign o2 = _GEN[15:2];	// /tmp/tmp5xcr08v3.mlir:3:8, :6:8, :25:3
+  assign o3 = _GEN_0[8:1];	// /tmp/tmp5xcr08v3.mlir:13:8, :14:8, :25:3
+  assign o4 = arg0[30:23] &amp; 8&#x27;hC;	// /tmp/tmp5xcr08v3.mlir:19:13, :20:8, :21:8, :25:3
+endmodule
+
+module c2(	// /tmp/tmpc77s96mk.mlir:1:1
+  input  [31:0] arg0,	// /tmp/tmpc77s96mk.mlir:1:18
+  output [7:0]  o1,	// /tmp/tmpc77s96mk.mlir:1:35
+  output [13:0] o2,	// /tmp/tmpc77s96mk.mlir:1:48
+  output [7:0]  o3,	// /tmp/tmpc77s96mk.mlir:1:62
+                o4	// /tmp/tmpc77s96mk.mlir:1:75
+);
+
+  assign o1 = {3&#x27;h0, arg0[7:4], 1&#x27;h0};	// /tmp/tmpc77s96mk.mlir:6:14, :7:14, :8:10, :9:10, :16:5
+  assign o2 = {8&#x27;h0, arg0[7:4], 2&#x27;h0};	// /tmp/tmpc77s96mk.mlir:4:14, :5:14, :8:10, :10:10, :16:5
+  assign o3 = {3&#x27;h0, arg0[5:1] &amp; 5&#x27;h15};	// /tmp/tmpc77s96mk.mlir:3:16, :6:14, :11:10, :12:10, :13:10, :16:5
+  assign o4 = {4&#x27;h0, arg0[26:25], 2&#x27;h0};	// /tmp/tmpc77s96mk.mlir:2:14, :5:14, :14:10, :15:10, :16:5
+endmodule
+
+module tb;
+reg [31:0] arg0;
+wire [7:0] b_o1; wire [7:0] a_o1;
+wire [13:0] b_o2; wire [13:0] a_o2;
+wire [7:0] b_o3; wire [7:0] a_o3;
+wire [7:0] b_o4; wire [7:0] a_o4;
+c1 i1(.arg0(arg0), .o1(b_o1), .o2(b_o2), .o3(b_o3), .o4(b_o4));
+c2 i2(.arg0(arg0), .o1(a_o1), .o2(a_o2), .o3(a_o3), .o4(a_o4));
+initial begin
+  arg0 = 32&#x27;b000000z00000000000000000zzzz0000;
+  #1;
+  $display(&quot;RESULT %s&quot;, ((b_o1===a_o1) &amp;&amp; (b_o2===a_o2) &amp;&amp; (b_o3===a_o3) &amp;&amp; (b_o4===a_o4))?&quot;EQ&quot;:&quot;DIFF&quot;);
+  $display(&quot;  o1 before=%b after=%b&quot;, b_o1, a_o1);
+  $display(&quot;  o2 before=%b after=%b&quot;, b_o2, a_o2);
+  $display(&quot;  o3 before=%b after=%b&quot;, b_o3, a_o3);
+  $display(&quot;  o4 before=%b after=%b&quot;, b_o4, a_o4);
+  $finish;
+end
+endmodule
+</pre></details>
+</section>
+<section class="card" id="extractShift">
+<h2>extractShift <span class="sub"><a href="https://github.com/llvm/circt/blob/main/test/Dialect/Comb/canonicalization.mlir#L1225">canonicalization.mlir:1225</a></span></h2>
+<p class="verdict"><span class="badge eq2">2-state: equiv</span> <span class="badge neq4">4-state: inequivalent</span> <span class="badge bin">bin-flag stripped</span></p>
+<p class="desc"><b>Fold:</b> <code>extract(shl/mux/…)</code> shifting/extract interaction (see <code>extractShift</code> test). <b>4-state:</b> shift amount or value with <code>X/Z</code> makes original <code>shl</code> all-<code>X</code> (amount X) or precise-shifted <code>X</code>, while narrowed extract drops those bits and stays known. Counterexample <code>arg0=01XZ</code> shows <code>XXXX vs 00XX</code>.</p>
+<div class="grid">
+<div><h3>Before <span class="sub">(original, bin stripped)</span></h3><pre>hw.module @c1(in %arg0 : i4, out o1 : i1, out o2: i1, out o3: i1, out o4: i1) {
+  %c1 = hw.constant 1: i4
+  %0 = comb.shl %c1, %arg0 : i4
+  %1 = comb.shl %c1, %arg0 : i4
+  %2 = comb.shl %c1, %arg0 : i4
+
+  // CHECK: %[[O1:.+]] = comb.icmp eq %arg0, %c0_i4 : i4
+  %3 = comb.extract %0 from 0 : (i4) -&gt; i1
+
+  // CHECK: %[[O2:.+]] = comb.icmp eq %arg0, %c2_i4 : i4
+  %4 = comb.extract %1 from 2 : (i4) -&gt; i1
+
+  // CHECK: %[[O3:.+]] = comb.extract
+  %5 = comb.extract %2 from 2 : (i4) -&gt; i1
+
+  // CHECK: %[[O4:.+]] = comb.extract
+  %6 = comb.extract %2 from 2 : (i4) -&gt; i1
+
+  // CHECK: hw.output %[[O1]], %[[O2]], %[[O3]], %[[O4]]
+  hw.output %3, %4, %5, %6: i1, i1, i1, i1
+}
+
+// CHECK-LABEL: hw.module @moduloZeroDividend
+</pre></div>
+<div><h3>After <span class="sub">(canonicalized)</span></h3><pre>hw.module @c2(in %arg0 : i4, out o1 : i1, out o2 : i1, out o3 : i1, out o4 : i1) {
+    %c2_i4 = hw.constant 2 : i4
+    %c0_i4 = hw.constant 0 : i4
+    %c1_i4 = hw.constant 1 : i4
+    %0 = comb.shl %c1_i4, %arg0 : i4
+    %1 = comb.icmp eq %arg0, %c0_i4 : i4
+    %2 = comb.icmp eq %arg0, %c2_i4 : i4
+    %3 = comb.extract %0 from 2 : (i4) -&gt; i1
+    %4 = comb.extract %0 from 2 : (i4) -&gt; i1
+    hw.output %1, %2, %3, %4 : i1, i1, i1, i1
+  }
+</pre></div>
+</div>
+<h3>Counterexample inputs <span class="sub">(dual-rail Z3 model → 0/1/X/Z, MSB first)</span></h3>
+<table><tr><th>input</th><th>type</th><th>4-state</th><th>val/poison</th></tr><tr><td><code>%arg0</code></td><td>i4</td><td class='four'>01XZ</code></td><td><code>v=0101 p=0011</code></td></tr></table>
+<h3>Outputs under counterexample <span class="sub">(evaluated with Verilog-like 4-state semantics — same as SMT encoding)</span></h3>
+<table><tr><th>port</th><th>type</th><th>before</th><th>after</th><th></th></tr><tr><td>out0</td><td>i1</td><td class='four'>X</td><td class='four'>0</td><td>✗ differ</td></tr><tr><td>out1</td><td>i1</td><td class='four'>X</td><td class='four'>0</td><td>✗ differ</td></tr><tr><td>out2</td><td>i1</td><td class='four'>X</td><td class='four'>X</td><td>same</td></tr><tr><td>out3</td><td>i1</td><td class='four'>X</td><td class='four'>X</td><td>same</td></tr></table>
+<p class="io">Before outputs: <code class='four'>X</code> <span class='sub'>(i1)</span>, <code class='four'>X</code> <span class='sub'>(i1)</span>, <code class='four'>X</code> <span class='sub'>(i1)</span>, <code class='four'>X</code> <span class='sub'>(i1)</span><br>After outputs: <code class='four'>0</code> <span class='sub'>(i1)</span>, <code class='four'>0</code> <span class='sub'>(i1)</span>, <code class='four'>X</code> <span class='sub'>(i1)</span>, <code class='four'>X</code> <span class='sub'>(i1)</span></p>
+<p class="note">Model: free 4-state inputs (X and Z allowed) where <code>distinct(out_before,out_after)</code> is SAT. <code>val&amp;pois</code> per bit decodes to <code>00=0,01=1,10=X,11=Z</code>. Outputs differ as full <code>2*N</code>-bit vectors (val and poison both compared). Computed with int-based 4-state interpreter matching the SMT encoding (<code>and/or</code> Kleene, <code>mux</code> agreement-else-X, <code>eq/ne</code> precise known-differ else X, ordered <code>any-X→X</code>).</p>
+<details><summary>Executable Verilog reproducer (hidden) — save as <code>repro.v</code>, run <code>iverilog -o sim repro.v && vvp sim</code></summary><pre>module c1(	// /tmp/tmpkl7yn2vt.mlir:1:1
+  input  [3:0] arg0,	// /tmp/tmpkl7yn2vt.mlir:1:18
+  output       o1,	// /tmp/tmpkl7yn2vt.mlir:1:34
+               o2,	// /tmp/tmpkl7yn2vt.mlir:1:47
+               o3,	// /tmp/tmpkl7yn2vt.mlir:1:59
+               o4	// /tmp/tmpkl7yn2vt.mlir:1:71
+);
+
+  wire [3:0] _GEN = 4&#x27;h1 &lt;&lt; arg0;	// /tmp/tmpkl7yn2vt.mlir:2:9, :3:8
+  wire [3:0] _GEN_0 = 4&#x27;h1 &lt;&lt; arg0;	// /tmp/tmpkl7yn2vt.mlir:2:9, :4:8
+  wire [3:0] _GEN_1 = 4&#x27;h1 &lt;&lt; arg0;	// /tmp/tmpkl7yn2vt.mlir:2:9, :5:8
+  assign o1 = _GEN[0];	// /tmp/tmpkl7yn2vt.mlir:3:8, :8:8, :20:3
+  assign o2 = _GEN_0[2];	// /tmp/tmpkl7yn2vt.mlir:4:8, :11:8, :20:3
+  assign o3 = _GEN_1[2];	// /tmp/tmpkl7yn2vt.mlir:5:8, :14:8, :20:3
+  assign o4 = _GEN_1[2];	// /tmp/tmpkl7yn2vt.mlir:5:8, :17:8, :20:3
+endmodule
+
+module c2(	// /tmp/tmplhaj0a6m.mlir:1:1
+  input  [3:0] arg0,	// /tmp/tmplhaj0a6m.mlir:1:18
+  output       o1,	// /tmp/tmplhaj0a6m.mlir:1:34
+               o2,	// /tmp/tmplhaj0a6m.mlir:1:47
+               o3,	// /tmp/tmplhaj0a6m.mlir:1:60
+               o4	// /tmp/tmplhaj0a6m.mlir:1:73
+);
+
+  wire [3:0] _GEN = 4&#x27;h1 &lt;&lt; arg0;	// /tmp/tmplhaj0a6m.mlir:4:14, :5:10
+  assign o1 = arg0 == 4&#x27;h0;	// /tmp/tmplhaj0a6m.mlir:3:14, :6:10, :10:5
+  assign o2 = arg0 == 4&#x27;h2;	// /tmp/tmplhaj0a6m.mlir:2:14, :7:10, :10:5
+  assign o3 = _GEN[2];	// /tmp/tmplhaj0a6m.mlir:5:10, :8:10, :10:5
+  assign o4 = _GEN[2];	// /tmp/tmplhaj0a6m.mlir:5:10, :9:10, :10:5
+endmodule
+
+module tb;
+reg [3:0] arg0;
+wire b_o1; wire a_o1;
+wire b_o2; wire a_o2;
+wire b_o3; wire a_o3;
+wire b_o4; wire a_o4;
+c1 i1(.arg0(arg0), .o1(b_o1), .o2(b_o2), .o3(b_o3), .o4(b_o4));
+c2 i2(.arg0(arg0), .o1(a_o1), .o2(a_o2), .o3(a_o3), .o4(a_o4));
+initial begin
+  arg0 = 4&#x27;b01xz;
+  #1;
+  $display(&quot;RESULT %s&quot;, ((b_o1===a_o1) &amp;&amp; (b_o2===a_o2) &amp;&amp; (b_o3===a_o3) &amp;&amp; (b_o4===a_o4))?&quot;EQ&quot;:&quot;DIFF&quot;);
+  $display(&quot;  o1 before=%b after=%b&quot;, b_o1, a_o1);
+  $display(&quot;  o2 before=%b after=%b&quot;, b_o2, a_o2);
+  $display(&quot;  o3 before=%b after=%b&quot;, b_o3, a_o3);
+  $display(&quot;  o4 before=%b after=%b&quot;, b_o4, a_o4);
+  $finish;
+end
+endmodule
+</pre></details>
+</section>
+<section class="card" id="muxConstantsFold">
+<h2>muxConstantsFold <span class="sub"><a href="https://github.com/llvm/circt/blob/main/test/Dialect/Comb/canonicalization.mlir#L1352">canonicalization.mlir:1352</a></span></h2>
+<p class="verdict"><span class="badge eq2">2-state: equiv</span> <span class="badge neq4">4-state: inequivalent</span> <span class="badge bin">bin-flag stripped</span></p>
+<p class="desc"><b>Fold:</b> <code>mux(cond,-1,0) → replicate(cond)</code>. With <code>cond=Z</code>: before <code>mux(Z,all1,all0)=all-X</code> (1 vs 0 disagree → X per bit). After <code>replicate(Z)=all-Z</code>. <code>X≠Z</code>.</p>
+<div class="grid">
+<div><h3>Before <span class="sub">(original, bin stripped)</span></h3><pre>hw.module @c1(in %cond: i1, out o: i25) {
+  // CHECK-NEXT: %0 = comb.replicate %cond : (i1) -&gt; i25
+  %c0_i25 = hw.constant 0 : i25
+  %c-1_i25 = hw.constant -1 : i25
+  %0 = comb.mux %cond, %c-1_i25, %c0_i25 : i25
+  // CHECK-NEXT: hw.output %0
+  hw.output %0 : i25
+}
+
+// CHECK-LABEL: hw.module @muxCommon
+// This handles various cases of mux(cond, x, someop(x, y, z)).
+</pre></div>
+<div><h3>After <span class="sub">(canonicalized)</span></h3><pre>hw.module @c2(in %cond : i1, out o : i25) {
+    %0 = comb.replicate %cond : (i1) -&gt; i25
+    hw.output %0 : i25
+  }
+</pre></div>
+</div>
+<h3>Counterexample inputs <span class="sub">(dual-rail Z3 model → 0/1/X/Z, MSB first)</span></h3>
+<table><tr><th>input</th><th>type</th><th>4-state</th><th>val/poison</th></tr><tr><td><code>%cond</code></td><td>i1</td><td class='four'>Z</code></td><td><code>v=1 p=1</code></td></tr></table>
+<h3>Outputs under counterexample <span class="sub">(evaluated with Verilog-like 4-state semantics — same as SMT encoding)</span></h3>
+<table><tr><th>port</th><th>type</th><th>before</th><th>after</th><th></th></tr><tr><td>out0</td><td>i25</td><td class='four'>XXXXXXXXXXXXXXXXXXXXXXXXX</td><td class='four'>ZZZZZZZZZZZZZZZZZZZZZZZZZ</td><td>✗ differ</td></tr></table>
+<p class="io">Before outputs: <code class='four'>XXXXXXXXXXXXXXXXXXXXXXXXX</code> <span class='sub'>(i25)</span><br>After outputs: <code class='four'>ZZZZZZZZZZZZZZZZZZZZZZZZZ</code> <span class='sub'>(i25)</span></p>
+<p class="note">Model: free 4-state inputs (X and Z allowed) where <code>distinct(out_before,out_after)</code> is SAT. <code>val&amp;pois</code> per bit decodes to <code>00=0,01=1,10=X,11=Z</code>. Outputs differ as full <code>2*N</code>-bit vectors (val and poison both compared). Computed with int-based 4-state interpreter matching the SMT encoding (<code>and/or</code> Kleene, <code>mux</code> agreement-else-X, <code>eq/ne</code> precise known-differ else X, ordered <code>any-X→X</code>).</p>
+<details><summary>Executable Verilog reproducer (hidden) — save as <code>repro.v</code>, run <code>iverilog -o sim repro.v && vvp sim</code></summary><pre>module c1(	// /tmp/tmp1vp_e90n.mlir:1:1
+  input         cond,	// /tmp/tmp1vp_e90n.mlir:1:18
+  output [24:0] o	// /tmp/tmp1vp_e90n.mlir:1:33
+);
+
+  assign o = cond ? 25&#x27;h1FFFFFF : 25&#x27;h0;	// /tmp/tmp1vp_e90n.mlir:3:13, :4:14, :5:8, :7:3
+endmodule
+
+module c2(	// /tmp/tmpii755cf7.mlir:1:1
+  input         cond,	// /tmp/tmpii755cf7.mlir:1:18
+  output [24:0] o	// /tmp/tmpii755cf7.mlir:1:34
+);
+
+  assign o = {25{cond}};	// /tmp/tmpii755cf7.mlir:2:10, :3:5
+endmodule
+
+module tb;
+reg cond;
+wire [24:0] b_o; wire [24:0] a_o;
+c1 i1(.cond(cond), .o(b_o));
+c2 i2(.cond(cond), .o(a_o));
+initial begin
+  cond = 1&#x27;bz;
+  #1;
+  $display(&quot;RESULT %s&quot;, ((b_o===a_o))?&quot;EQ&quot;:&quot;DIFF&quot;);
+  $display(&quot;  o before=%b after=%b&quot;, b_o, a_o);
+  $finish;
+end
+endmodule
+</pre></details>
+</section>
+<section class="card" id="flatten_multi_use_and">
+<h2>flatten_multi_use_and <span class="sub"><a href="https://github.com/llvm/circt/blob/main/test/Dialect/Comb/canonicalization.mlir#L1445">canonicalization.mlir:1445</a></span></h2>
+<p class="verdict"><span class="badge eq2">2-state: equiv</span> <span class="badge neq4">4-state: inequivalent</span> <span class="badge bin">bin-flag stripped</span></p>
+<p class="desc">Pushing extract through multi-use <code>and</code> with constants. Dropping high <code>X/Z</code> bits that force all-<code>X</code> changes result; also <code>Z</code> preserved in concat padding vs collapsed to <code>X</code> by <code>and</code>.</p>
+<div class="grid">
+<div><h3>Before <span class="sub">(original, bin stripped)</span></h3><pre>hw.module @c1(
+  in %arg0: i8, in %arg1: i8, in %arg2: i8,
+  out o1: i8, out o2: i8
+) {
+  // CHECK-NEXT: %c0_i5 = hw.constant 0 : i5
+  // CHECK-NEXT: %c0_i4 = hw.constant 0 : i4
+
+  %c15_i8 = hw.constant 15 : i8
+  %0 = comb.and %arg0, %c15_i8 : i8
+  // CHECK-NEXT: [[TMP1:%.+]] = comb.extract %arg0 from 0 : (i8) -&gt; i4
+  // CHECK-NEXT: [[TMP2:%.+]] = comb.concat %c0_i4, [[TMP1]] : i4, i4
+
+  %c7_i8 = hw.constant 7 : i8
+  %1 = comb.and %arg1, %0, %arg2, %c7_i8 : i8
+  // CHECK-NEXT: [[TMP3:%.+]] = comb.extract %arg1 from 0 : (i8) -&gt; i3
+  // CHECK-NEXT: [[TMP4:%.+]] = comb.extract %arg0 from 0 : (i8) -&gt; i3
+  // CHECK-NEXT: [[TMP5:%.+]] = comb.extract %arg2 from 0 : (i8) -&gt; i3
+  // CHECK-NEXT: [[TMP6:%.+]] = comb.and [[TMP3]], [[TMP4]], [[TMP5]] : i3
+  // CHECK-NEXT: [[TMP7:%.+]] = comb.concat %c0_i5, [[TMP6]] : i5, i3
+
+  // CHECK-NEXT: hw.output [[TMP2]], [[TMP7]]
+  hw.output %0, %1 : i8, i8
+}
+
+// CHECK-LABEL: hw.module @muxCommonOp(
+// This handles various cases of mux(cond, someop(...), someop(...)).
+</pre></div>
+<div><h3>After <span class="sub">(canonicalized)</span></h3><pre>hw.module @c2(in %arg0 : i8, in %arg1 : i8, in %arg2 : i8, out o1 : i8, out o2 : i8) {
+    %c0_i5 = hw.constant 0 : i5
+    %c0_i4 = hw.constant 0 : i4
+    %0 = comb.extract %arg0 from 0 : (i8) -&gt; i4
+    %1 = comb.concat %c0_i4, %0 : i4, i4
+    %2 = comb.extract %arg1 from 0 : (i8) -&gt; i3
+    %3 = comb.extract %arg0 from 0 : (i8) -&gt; i3
+    %4 = comb.extract %arg2 from 0 : (i8) -&gt; i3
+    %5 = comb.and %2, %3, %4 : i3
+    %6 = comb.concat %c0_i5, %5 : i5, i3
+    hw.output %1, %6 : i8, i8
+  }
+</pre></div>
+</div>
+<h3>Counterexample inputs <span class="sub">(dual-rail Z3 model → 0/1/X/Z, MSB first)</span></h3>
+<table><tr><th>input</th><th>type</th><th>4-state</th><th>val/poison</th></tr><tr><td><code>%arg0</code></td><td>i8</td><td class='four'>0000ZZZZ</code></td><td><code>v=00001111 p=00001111</code></td></tr><tr><td><code>%arg1</code></td><td>i8</td><td class='four'>00000100</code></td><td><code>v=00000100 p=00000000</code></td></tr><tr><td><code>%arg2</code></td><td>i8</td><td class='four'>00000X01</code></td><td><code>v=00000001 p=00000100</code></td></tr></table>
+<h3>Outputs under counterexample <span class="sub">(evaluated with Verilog-like 4-state semantics — same as SMT encoding)</span></h3>
+<table><tr><th>port</th><th>type</th><th>before</th><th>after</th><th></th></tr><tr><td>out0</td><td>i8</td><td class='four'>0000XXXX</td><td class='four'>0000ZZZZ</td><td>✗ differ</td></tr><tr><td>out1</td><td>i8</td><td class='four'>00000X00</td><td class='four'>00000X00</td><td>same</td></tr></table>
+<p class="io">Before outputs: <code class='four'>0000XXXX</code> <span class='sub'>(i8)</span>, <code class='four'>00000X00</code> <span class='sub'>(i8)</span><br>After outputs: <code class='four'>0000ZZZZ</code> <span class='sub'>(i8)</span>, <code class='four'>00000X00</code> <span class='sub'>(i8)</span></p>
+<p class="note">Model: free 4-state inputs (X and Z allowed) where <code>distinct(out_before,out_after)</code> is SAT. <code>val&amp;pois</code> per bit decodes to <code>00=0,01=1,10=X,11=Z</code>. Outputs differ as full <code>2*N</code>-bit vectors (val and poison both compared). Computed with int-based 4-state interpreter matching the SMT encoding (<code>and/or</code> Kleene, <code>mux</code> agreement-else-X, <code>eq/ne</code> precise known-differ else X, ordered <code>any-X→X</code>).</p>
+<details><summary>Executable Verilog reproducer (hidden) — save as <code>repro.v</code>, run <code>iverilog -o sim repro.v && vvp sim</code></summary><pre>module c1(	// /tmp/tmplu6u3237.mlir:1:1
+  input  [7:0] arg0,	// /tmp/tmplu6u3237.mlir:2:6
+               arg1,	// /tmp/tmplu6u3237.mlir:2:20
+               arg2,	// /tmp/tmplu6u3237.mlir:2:34
+  output [7:0] o1,	// /tmp/tmplu6u3237.mlir:3:7
+               o2	// /tmp/tmplu6u3237.mlir:3:19
+);
+
+  wire [7:0] _GEN = arg0 &amp; 8&#x27;hF;	// /tmp/tmplu6u3237.mlir:8:13, :9:8
+  assign o1 = _GEN;	// /tmp/tmplu6u3237.mlir:9:8, :22:3
+  assign o2 = arg1 &amp; _GEN &amp; arg2 &amp; 8&#x27;h7;	// /tmp/tmplu6u3237.mlir:9:8, :13:12, :14:8, :22:3
+endmodule
+
+module c2(	// /tmp/tmpjcm8xw7n.mlir:1:1
+  input  [7:0] arg0,	// /tmp/tmpjcm8xw7n.mlir:1:18
+               arg1,	// /tmp/tmpjcm8xw7n.mlir:1:33
+               arg2,	// /tmp/tmpjcm8xw7n.mlir:1:48
+  output [7:0] o1,	// /tmp/tmpjcm8xw7n.mlir:1:64
+               o2	// /tmp/tmpjcm8xw7n.mlir:1:77
+);
+
+  assign o1 = {4&#x27;h0, arg0[3:0]};	// /tmp/tmpjcm8xw7n.mlir:3:14, :4:10, :5:10, :11:5
+  assign o2 = {5&#x27;h0, arg1[2:0] &amp; arg0[2:0] &amp; arg2[2:0]};	// /tmp/tmpjcm8xw7n.mlir:2:14, :6:10, :7:10, :8:10, :9:10, :10:10, :11:5
+endmodule
+
+module tb;
+reg [7:0] arg0;
+reg [7:0] arg1;
+reg [7:0] arg2;
+wire [7:0] b_o1; wire [7:0] a_o1;
+wire [7:0] b_o2; wire [7:0] a_o2;
+c1 i1(.arg0(arg0), .arg1(arg1), .arg2(arg2), .o1(b_o1), .o2(b_o2));
+c2 i2(.arg0(arg0), .arg1(arg1), .arg2(arg2), .o1(a_o1), .o2(a_o2));
+initial begin
+  arg0 = 8&#x27;b0000zzzz;
+  arg1 = 8&#x27;b00000100;
+  arg2 = 8&#x27;b00000x01;
+  #1;
+  $display(&quot;RESULT %s&quot;, ((b_o1===a_o1) &amp;&amp; (b_o2===a_o2))?&quot;EQ&quot;:&quot;DIFF&quot;);
+  $display(&quot;  o1 before=%b after=%b&quot;, b_o1, a_o1);
+  $display(&quot;  o2 before=%b after=%b&quot;, b_o2, a_o2);
+  $finish;
+end
+endmodule
+</pre></details>
+</section>
+<section class="card" id="Issue5531">
+<h2>Issue5531 <span class="sub"><a href="https://github.com/llvm/circt/blob/main/test/Dialect/Comb/canonicalization.mlir#L1627">canonicalization.mlir:1627</a></span></h2>
+<p class="verdict"><span class="badge eq2">2-state: equiv</span> <span class="badge neq4">4-state: inequivalent</span> <span class="badge bin">bin-flag stripped</span></p>
+<p class="desc"><b>Fold:</b> <code>extract(mul(i64,i64),0..32) → mul(extract-lo32,extract-lo32)</code>. Same arithmetic all-<code>X</code> vs narrowing: <code>X</code> in high 32 bits forces original 64-bit mul (and its low extract) to <code>X</code>, narrowed 32-bit mul drops those bits and stays known.</p>
+<div class="grid">
+<div><h3>Before <span class="sub">(original, bin stripped)</span></h3><pre>hw.module @c1(in %arg0 : i64, in %arg1 : i64, out out: i32) {
+  // CHECK:  %2 = comb.mul %0, %1 {sv.namehint = &quot;hint&quot;} : i32
+  %2 = comb.mul %arg0, %arg1 {sv.namehint = &quot;hint&quot;} : i64
+  %3 = comb.extract %2 from 0 : (i64) -&gt; i32
+  hw.output %3 : i32
+}
+
+// or(mux(c_1, a, 0), mux(c_2, a, 0), ..., mux(c_n, a, 0)) -&gt; mux(or(c_1, c_2, .., c_n), a, 0)
+// CHECK-LABEL: OrMuxSameTrueValueAndZero
+// CHECK:      %[[OR:.+]] = comb.or %tag_0, %tag_1, %tag_2, %tag_3 : i1
+// CHECK-NEXT: %[[RESULT:.+]] = comb.mux %[[OR]], %in, %c0_i4 : i4
+// CHECK-NEXT: hw.output %[[RESULT]]
+</pre></div>
+<div><h3>After <span class="sub">(canonicalized)</span></h3><pre>hw.module @c2(in %arg0 : i64, in %arg1 : i64, out out : i32) {
+    %0 = comb.extract %arg0 from 0 : (i64) -&gt; i32
+    %1 = comb.extract %arg1 from 0 : (i64) -&gt; i32
+    %2 = comb.mul %0, %1 {sv.namehint = &quot;hint&quot;} : i32
+    hw.output %2 : i32
+  }
+</pre></div>
+</div>
+<h3>Counterexample inputs <span class="sub">(dual-rail Z3 model → 0/1/X/Z, MSB first)</span></h3>
+<table><tr><th>input</th><th>type</th><th>4-state</th><th>val/poison</th></tr><tr><td><code>%arg0</code></td><td>i64</td><td class='four'>000000000000000X000000000000000011000110010110000000100001100101</code></td><td><code>v=0000000000000000000000000000000011000110010110000000100001100101 p=0000000000000001000000000000000000000000000000000000000000000000</code></td></tr><tr><td><code>%arg1</code></td><td>i64</td><td class='four'>0000000000000000000000000000000010111101000011010111101011100111</code></td><td><code>v=0000000000000000000000000000000010111101000011010111101011100111 p=0000000000000000000000000000000000000000000000000000000000000000</code></td></tr></table>
+<h3>Outputs under counterexample <span class="sub">(evaluated with Verilog-like 4-state semantics — same as SMT encoding)</span></h3>
+<table><tr><th>port</th><th>type</th><th>before</th><th>after</th><th></th></tr><tr><td>out0</td><td>i32</td><td class='four'>XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX</td><td class='four'>11101011100100001011010100100011</td><td>✗ differ</td></tr></table>
+<p class="io">Before outputs: <code class='four'>XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX</code> <span class='sub'>(i32)</span><br>After outputs: <code class='four'>11101011100100001011010100100011</code> <span class='sub'>(i32)</span></p>
+<p class="note">Model: free 4-state inputs (X and Z allowed) where <code>distinct(out_before,out_after)</code> is SAT. <code>val&amp;pois</code> per bit decodes to <code>00=0,01=1,10=X,11=Z</code>. Outputs differ as full <code>2*N</code>-bit vectors (val and poison both compared). Computed with int-based 4-state interpreter matching the SMT encoding (<code>and/or</code> Kleene, <code>mux</code> agreement-else-X, <code>eq/ne</code> precise known-differ else X, ordered <code>any-X→X</code>).</p>
+<details><summary>Executable Verilog reproducer (hidden) — save as <code>repro.v</code>, run <code>iverilog -o sim repro.v && vvp sim</code></summary><pre>module c1(	// /tmp/tmpn17pk0aw.mlir:1:1
+  input  [63:0] arg0,	// /tmp/tmpn17pk0aw.mlir:1:18
+                arg1,	// /tmp/tmpn17pk0aw.mlir:1:34
+  output [31:0] out	// /tmp/tmpn17pk0aw.mlir:1:51
+);
+
+  wire [63:0] hint = arg0 * arg1;	// /tmp/tmpn17pk0aw.mlir:3:8
+  assign out = hint[31:0];	// /tmp/tmpn17pk0aw.mlir:3:8, :4:8, :5:3
+endmodule
+
+module c2(	// /tmp/tmpd76sd7hn.mlir:1:1
+  input  [63:0] arg0,	// /tmp/tmpd76sd7hn.mlir:1:18
+                arg1,	// /tmp/tmpd76sd7hn.mlir:1:34
+  output [31:0] out	// /tmp/tmpd76sd7hn.mlir:1:51
+);
+
+  assign out = arg0[31:0] * arg1[31:0];	// /tmp/tmpd76sd7hn.mlir:2:10, :3:10, :4:10, :5:5
+endmodule
+
+module tb;
+reg [63:0] arg0;
+reg [63:0] arg1;
+wire [31:0] b_out; wire [31:0] a_out;
+c1 i1(.arg0(arg0), .arg1(arg1), .out(b_out));
+c2 i2(.arg0(arg0), .arg1(arg1), .out(a_out));
+initial begin
+  arg0 = 64&#x27;b000000000000000x000000000000000011000110010110000000100001100101;
+  arg1 = 64&#x27;b0000000000000000000000000000000010111101000011010111101011100111;
+  #1;
+  $display(&quot;RESULT %s&quot;, ((b_out===a_out))?&quot;EQ&quot;:&quot;DIFF&quot;);
+  $display(&quot;  out before=%b after=%b&quot;, b_out, a_out);
+  $finish;
+end
+endmodule
+</pre></details>
+</section>
+<footer><p>Encoding recap: <code>and/or</code> Kleene (<code>0&amp;X=0,1|X=1</code> else X, never Z); <code>xor</code> any-X→X; <code>mux</code> X-select = per-bit agreement else X (Z-select disagreement → X, hence X-vs-Z mismatches); <code>icmp/arith</code> any-X→all-X; <code>ceq/cne</code> exact (distinguishes X/Z), <code>weq/wne</code> wildcard. Arithmetic all-X makes narrowing (<code>extract(add)→add(extract)</code>) unsound.</p></footer>
+</body></html>
